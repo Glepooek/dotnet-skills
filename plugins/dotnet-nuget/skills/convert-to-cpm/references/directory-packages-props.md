@@ -10,13 +10,7 @@ Only the nearest `Directory.Packages.props` is evaluated per project. CPM also s
 
 ## Creating the file
 
-Use the .NET CLI (available in .NET 8+):
-
-```bash
-dotnet new packagesprops
-```
-
-This generates a `Directory.Packages.props` with `ManagePackageVersionsCentrally` set to `true`. If the CLI template is not available, create the file manually:
+Create the file directly so the workflow does not depend on whether the installed SDK includes the `packagesprops` template:
 
 ```xml
 <Project>
@@ -34,8 +28,8 @@ This generates a `Directory.Packages.props` with `ManagePackageVersionsCentrally
 Add a `<PackageVersion>` entry for each unique package, using the resolved version from the audit. Sort entries alphabetically by package ID:
 
 ```xml
-<PackageVersion Include="Microsoft.Extensions.Logging" Version="9.0.0" />
-<PackageVersion Include="System.Text.Json" Version="10.0.1" />
+<PackageVersion Include="PackageA" Version="1.2.3" />
+<PackageVersion Include="PackageB" Version="4.5.6" />
 ```
 
 ## Conditional versions
@@ -47,7 +41,7 @@ If the same package needs different versions for different target frameworks, us
 <PackageVersion Include="PackageA" Version="2.0.0" Condition="'$(TargetFramework)' == 'net8.0'" />
 ```
 
-Ask the user before using conditional versions — it may be preferable to standardize on a single version.
+Preserve an existing target-framework-specific version split when a single version is incompatible. Ask only when multiple valid policies remain and the user has not already supplied a strategy. Record the preserved condition in the report.
 
 ## VersionOverride
 
@@ -57,4 +51,4 @@ If a project intentionally needs a different version than the centrally defined 
 <PackageReference Include="System.Text.Json" VersionOverride="9.0.0" />
 ```
 
-Ask the user before applying `VersionOverride` — in most cases, version alignment is preferred.
+Apply `VersionOverride` only when the user's chosen strategy requires it. If no strategy was supplied, ask before applying it; in most cases, version alignment is preferred.

@@ -4,31 +4,44 @@ Verify the CPM conversion is version-neutral by comparing resolved package versi
 
 ## Capturing package lists
 
-Use `dotnet package list` to snapshot resolved versions. Always build from a clean state first to ensure accurate resolution.
+Use the same explicit project or solution target for every command. Always build from a clean state first.
+
+Run `dotnet --version` once from the scope directory and select the package-list syntax by SDK version instead of probing with commands that may fail:
+
+- SDK 10 or later: use `dotnet package list --project <scope> --format json --no-restore`.
+- SDK 7.0.200 through 9.x: use `dotnet list <scope> package --format json --no-restore`.
+- SDK older than 7.0.200 cannot produce the required JSON snapshots; stop and report that SDK 7.0.200 or later is required for this workflow.
+- For a single project when the working directory contains exactly that project, the target may be omitted.
+- A `.slnx` scope requires SDK 9.0.201 or later so build, restore, and package-list operations all support the format. If it is unsupported, stop and report the prerequisite.
+
+If `dotnet --version` fails, do not try roll-forward overrides, install an SDK, create a temporary `global.json`, or invoke SDK assemblies directly. Report the SDK required by the existing `global.json` or project and stop.
 
 ### Baseline (before conversion)
 
 ```bash
-dotnet clean
-dotnet build -bl:baseline.binlog
-dotnet package list --format json > baseline-packages.json
+dotnet clean <scope>
+dotnet restore <scope>
+dotnet build <scope> --no-restore -bl:baseline.binlog
+dotnet package list --project <scope> --format json --include-transitive --no-restore > baseline-packages.json
 ```
 
 ### Post-conversion (after all changes)
 
 ```bash
-dotnet clean
-dotnet build -bl:after-cpm.binlog
-dotnet package list --format json > after-cpm-packages.json
+dotnet clean <scope>
+dotnet restore <scope>
+dotnet build <scope> --no-restore -bl:after-cpm.binlog
+dotnet package list --project <scope> --format json --include-transitive --no-restore > after-cpm-packages.json
 ```
 
-If `--format json` is not available (requires .NET 8 SDK+), use the default tabular output:
+For SDK 9 or earlier, replace each noun-first package-list command above with the legacy form. Do not try both forms after the SDK version has been determined.
 
-```bash
-dotnet package list > baseline-packages.txt
-```
+Keep normal output small:
 
-For solution-scoped conversions, pass the solution file to all commands.
+- Redirect routine build output to a log or suppress it. On success, report only status and artifact paths.
+- On failure, inspect the relevant error lines or a short tail rather than loading the full build output.
+- Never read a binlog as text.
+- Preserve package JSON, but use a JSON parser to extract only project path, framework, package ID, requested version, and resolved version. Do not print or read the raw JSON when a compact extraction is available.
 
 ## Producing the comparison
 
@@ -49,9 +62,9 @@ Present changes and unchanged packages in separate tables. The **Changes** table
 ```
 | Project | Package | Before | After | Status |
 |---------|---------|--------|-------|--------|
-| Legacy.csproj | System.Text.Json | 8.0.4 | 9.0.0 | Aligned to highest version |
-| Core.csproj | System.Text.Json | 9.0.0 | 9.0.0 | VersionOverride |
-| Shared.csproj | Azure.Identity | 1.10.0 | 1.10.0 | VersionOverride |
+| ProjectA.csproj | PackageA | 1.0.0 | 2.0.0 | Aligned to highest version |
+| ProjectB.csproj | PackageA | 1.0.0 | 1.0.0 | VersionOverride |
+| ProjectC.csproj | PackageB | — | 3.1.0 | Added |
 ```
 
 **Unchanged:**
@@ -59,10 +72,8 @@ Present changes and unchanged packages in separate tables. The **Changes** table
 ```
 | Project | Package | Version |
 |---------|---------|---------|
-| Api.csproj | System.Text.Json | 10.0.1 |
-| Api.csproj | Azure.Storage.Blobs | 12.24.0 |
-| Web.csproj | OpenTelemetry.Extensions.Hosting | 1.15.0 |
-| Tests.csproj | xunit | 2.9.3 |
+| ProjectA.csproj | PackageB | 3.1.0 |
+| ProjectB.csproj | PackageC | 4.2.0 |
 ```
 
 If there are no changes at all, state that the conversion is fully version-neutral and present only the unchanged table.
