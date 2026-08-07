@@ -2,12 +2,12 @@
 * @webreidi @AbhitejJohn
 
 # Engineering and CI/CD
-/eng/ @ViktorHofer @JanKrivanek
-/.github/workflows/ @ViktorHofer @JanKrivanek
+/eng/ @AbhitejJohn @JanKrivanek
+/.github/workflows/ @AbhitejJohn @JanKrivanek
 
 # msbuild
-/plugins/dotnet-msbuild/ @ViktorHofer @JanKrivanek @dotnet/skills-msbuild-reviewers
-/tests/dotnet-msbuild/ @ViktorHofer @JanKrivanek @dotnet/skills-msbuild-reviewers
+/plugins/dotnet-msbuild/ @dotnet/msbuild @JanKrivanek @YuliiaKovalova
+/tests/dotnet-msbuild/ @dotnet/msbuild @JanKrivanek @YuliiaKovalova
 
 # dotnet (common everyday C#/.NET)
 /plugins/dotnet/skills/setup-local-sdk/ @dotnet/roslyn-ide @dotnet/skills-csharp-language-reviewers
@@ -23,19 +23,6 @@
 
 /plugins/dotnet-advanced/skills/nuget-trusted-publishing/ @lewing @kartheekp-ms @dotnet/skills-csharp-language-reviewers
 /tests/dotnet-advanced/nuget-trusted-publishing/ @lewing @kartheekp-ms @dotnet/skills-csharp-language-reviewers
-
-# dotnet-ai (AI generation development)
-/plugins/dotnet-ai/skills/mcp-csharp-create/ @leslierichardson95 @cathysull
-/tests/dotnet-ai/mcp-csharp-create/ @leslierichardson95 @cathysull
-
-/plugins/dotnet-ai/skills/mcp-csharp-debug/ @leslierichardson95 @cathysull
-/tests/dotnet-ai/mcp-csharp-debug/ @leslierichardson95 @cathysull
-
-/plugins/dotnet-ai/skills/mcp-csharp-publish/ @leslierichardson95 @cathysull
-/tests/dotnet-ai/mcp-csharp-publish/ @leslierichardson95 @cathysull
-
-/plugins/dotnet-ai/skills/mcp-csharp-test/ @leslierichardson95 @cathysull
-/tests/dotnet-ai/mcp-csharp-test/ @leslierichardson95 @cathysull
 
 # dotnet-upgrade (migrating and upgrading .NET projects)
 /plugins/dotnet-upgrade/skills/thread-abort-migration/ @dotnet/appmodel @dotnet/skills-upgrade-reviewers
@@ -94,6 +81,9 @@
 # dotnet-data (data access, Entity Framework)
 /plugins/dotnet-data/skills/optimizing-ef-core-queries/ @dotnet/efteam @dotnet/skills-data-reviewers
 /tests/dotnet-data/optimizing-ef-core-queries/ @dotnet/efteam @dotnet/skills-data-reviewers
+
+/plugins/dotnet-data/skills/create-datadriven-aspnetcore/ @JakeRadMSFT @dotnet/skills-data-reviewers
+/tests/dotnet-data/create-datadriven-aspnetcore/ @JakeRadMSFT @dotnet/skills-data-reviewers
 
 # dotnet-test (everything testing related)
 /plugins/dotnet-test/ @dotnet/dotnet-testing
