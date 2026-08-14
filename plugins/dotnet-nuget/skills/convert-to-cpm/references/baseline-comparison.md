@@ -22,7 +22,16 @@ If `dotnet --version` fails, do not try roll-forward overrides, install an SDK, 
 dotnet clean <scope>
 dotnet restore <scope>
 dotnet build <scope> --no-restore -bl:baseline.binlog
+```
+
+Then run exactly one package-list command for the active SDK:
+
+```bash
+# SDK 10 or later
 dotnet package list --project <scope> --format json --include-transitive --no-restore > baseline-packages.json
+
+# SDK 7.0.200 through 9.x
+dotnet list <scope> package --format json --include-transitive --no-restore > baseline-packages.json
 ```
 
 ### Post-conversion (after all changes)
@@ -31,10 +40,19 @@ dotnet package list --project <scope> --format json --include-transitive --no-re
 dotnet clean <scope>
 dotnet restore <scope>
 dotnet build <scope> --no-restore -bl:after-cpm.binlog
-dotnet package list --project <scope> --format json --include-transitive --no-restore > after-cpm-packages.json
 ```
 
-For SDK 9 or earlier, replace each noun-first package-list command above with the legacy form. Do not try both forms after the SDK version has been determined.
+Then run exactly one package-list command for the active SDK:
+
+```bash
+# SDK 10 or later
+dotnet package list --project <scope> --format json --include-transitive --no-restore > after-cpm-packages.json
+
+# SDK 7.0.200 through 9.x
+dotnet list <scope> package --format json --include-transitive --no-restore > after-cpm-packages.json
+```
+
+Do not try both package-list forms after the SDK version has been determined.
 
 Keep normal output small:
 

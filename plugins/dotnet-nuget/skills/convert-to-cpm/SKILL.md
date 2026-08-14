@@ -60,7 +60,7 @@ Never preload all references.
 
 ### 1. Scope and preflight
 
-- Resolve the project/solution scope. For a solution, list its projects. For a directory, search only beneath that directory.
+- Resolve the project/solution scope. For a solution, list its projects. For a directory, search only beneath that directory and select one explicit CLI target that covers the resolved scope: use its single `.sln`/`.slnx`, or its single project when no solution exists. If multiple targets exist or no single target covers the scope, ask the user to select one before running .NET commands.
 - Check for `packages.config`; if found, switch to Guard mode and stop.
 - Check the scope and ancestors for `Directory.Packages.props`. If CPM is already fully enabled, report that and stop. If a partial file exists, preserve it and ask only when its intended scope is ambiguous.
 - Run all .NET commands from the resolved scope directory, not from an unrelated parent workspace.
