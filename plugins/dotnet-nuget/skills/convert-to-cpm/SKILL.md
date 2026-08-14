@@ -23,7 +23,7 @@ Centralize package versions in `Directory.Packages.props` while preserving proje
 Do this before running builds or changing files.
 
 1. **Guard mode** -- If any in-scope project uses `packages.config`, stop. Explain that CPM requires `PackageReference` and recommend migrating first. Do not create or modify files.
-2. **Recommendation mode** -- Use when the user asks to update, align, bump, or sync packages but has not explicitly authorized a CPM conversion. Inspect only the named scope, summarize conflicts and complexities, and explain CPM as the durable option for preventing future drift. Present the trade-off between direct alignment and CPM conversion, offer to perform the conversion, and wait for the user's choice. **Do not modify files, run builds, capture conversion artifacts, or continue into the conversion workflow without authorization.**
+2. **Package-maintenance mode** -- A request to update, align, bump, or sync packages authorizes those package edits, not CPM conversion. Audit the named scope, resolve the requested versions, update existing project/shared version declarations, and restore/build every affected CLI target. Ask only when the version or alignment policy is ambiguous. Do not create or modify `Directory.Packages.props`, remove versions for CPM, or capture conversion artifacts. Complete the package work, then recommend CPM as the durable follow-up.
 3. **Conversion mode** -- Use only when the user explicitly asks to adopt, enable, or convert to CPM. Follow the workflow below.
 
 If the scope is unclear, ask once before proceeding.
@@ -31,7 +31,7 @@ If the scope is unclear, ask once before proceeding.
 ### Default execution plan
 
 - **Guard**: use a minimal scoped detection pass, then answer and stop.
-- **Recommendation**: use a compact read-only audit, then answer and stop. Do not read conversion references.
+- **Package maintenance**: use a compact audit, edit only the requested package versions in their existing locations, validate affected targets, then recommend CPM. Do not read conversion references or enter the conversion workflow.
 - **Conversion**: batch the preflight, baseline, audit/mutation, final validation, and report work to avoid redundant turns. Revisit a stage only when new CPM-specific evidence requires a targeted follow-up.
 
 This plan is an efficiency default, not a hard cap. Never omit an in-scope project, imported `.props`/`.targets` file, detected complexity, required validation, or deliverable to save a turn. Batch complete work where practical.
@@ -60,7 +60,8 @@ Never preload all references.
 
 ### 1. Scope and preflight
 
-- Resolve the project/solution scope. For a solution, list its projects. For a directory, search only beneath that directory and select one explicit CLI target that covers the resolved scope: use its single `.sln`/`.slnx`, or its single project when no solution exists. If multiple targets exist or no single target covers the scope, ask the user to select one before running .NET commands.
+- Resolve the project/solution scope. For a solution, list its projects. For a directory, search only beneath that directory and create an explicit target set that covers the full scope: use each applicable `.sln`/`.slnx`, then add each project not covered by a solution. Verify that every in-scope project is covered and avoid duplicate work for projects that occur in more than one target. Ask only when overlapping targets or repository boundaries make the intended coverage ambiguous; never ask the user to select one target when that would omit in-scope projects.
+- Determine CPM management scopes separately from CLI targets. Group projects that will share one central version policy and place one `Directory.Packages.props` at each group's first common ancestor, while respecting existing nearest-file boundaries. Multiple CLI targets can share one CPM file; independent project groups can require separate files.
 - Check for `packages.config`; if found, switch to Guard mode and stop.
 - Check the scope and ancestors for `Directory.Packages.props`. If CPM is already fully enabled, report that and stop. If a partial file exists, preserve it and ask only when its intended scope is ambiguous.
 - Run all .NET commands from the resolved scope directory, not from an unrelated parent workspace.
@@ -72,15 +73,15 @@ Read [baseline-comparison.md](references/baseline-comparison.md). From the scope
 
 Then use one command batch to:
 
-1. Clean, restore, and build the scope, writing `baseline.binlog`.
-2. Write resolved packages to `baseline-packages.json` without restoring again.
+1. Clean, restore, and build every explicit target. Use `baseline.binlog` for one target or a unique `baseline-<target-key>.binlog` for each of multiple targets.
+2. Write resolved packages for every target without restoring again. Use `baseline-packages.json` for one target or a matching `baseline-packages-<target-key>.json` for each of multiple targets.
 3. Keep normal command output concise. Save full output to artifacts when useful; inspect only errors on failure and never read the binlog as text.
 
-If the baseline build fails, stop without modifying files. Preserve both baseline artifacts.
+Finish every baseline before editing. If any baseline build fails, stop without modifying files and preserve all artifacts already produced.
 
 ### 3. Audit with a targeted checklist
 
-Use the baseline snapshot plus one targeted scan of in-scope project, `.props`, and `.targets` files. Identify:
+Use all baseline snapshots plus one targeted scan of in-scope project, `.props`, and `.targets` files. Identify:
 
 - Package IDs, resolved versions, and consuming projects
 - Version conflicts
@@ -97,7 +98,7 @@ Present conflicts and their impact. Explicitly classify major-version alignment 
 
 ### 4. Create CPM files and update references
 
-- Create or update `Directory.Packages.props` at the correct scope with `ManagePackageVersionsCentrally` set to `true`.
+- Create or update each required `Directory.Packages.props` at its computed management scope with `ManagePackageVersionsCentrally` set to `true`.
 - Add one alphabetically sorted `PackageVersion` per package, preserving required target-framework conditions.
 - Remove only `Version` from managed `PackageReference` items in projects and imported files.
 - Preserve conditions, whitespace, and all other metadata such as `PrivateAssets`, `IncludeAssets`, `ExcludeAssets`, `GeneratePathProperty`, and `Aliases`.
@@ -114,8 +115,8 @@ Do not rely on a `$()` reference scan to prove that the XML property definition 
 
 Using [baseline-comparison.md](references/baseline-comparison.md), validate the final on-disk state after all project, shared-file, and property edits. Use one command batch to:
 
-1. Clean, restore, and build the converted scope, writing `after-cpm.binlog`.
-2. Write resolved packages to `after-cpm-packages.json` without restoring again.
+1. Clean, restore, and build every explicit target after all CPM edits. Use `after-cpm.binlog` for one target or a matching `after-cpm-<target-key>.binlog` for each of multiple targets.
+2. Write resolved packages for every target without restoring again. Use `after-cpm-packages.json` for one target or a matching `after-cpm-packages-<target-key>.json` for each of multiple targets.
 3. Produce a compact per-project changes/unchanged comparison without printing or rereading the full JSON files.
 4. If resolved versions changed and the repository exposes a routine, scoped test command for affected projects, run it with `--no-build --no-restore` and record the result. If tests require substantial setup, broad infrastructure, or user approval, recommend the exact scoped command instead. A version-neutral conversion does not require an automatic test run.
 
@@ -125,17 +126,19 @@ If a test run fails after a successful build, inspect only enough output to dete
 
 ### 6. Write the report
 
-Read [report-template.md](references/report-template.md) now, not earlier. Create `convert-to-cpm.md` beside the other artifacts. It must include the six required sections, concrete conflict impacts, the package comparison, risk level, follow-ups, artifact usage, and the name of every shared `.props`/`.targets` file inspected or changed. In the final response, mention those shared files, the risk level, and how any conditional references and target frameworks were preserved. Avoid rewriting the report after validation unless verification finds an omission or incorrect evidence.
+Read [report-template.md](references/report-template.md) now, not earlier. Create `convert-to-cpm.md` beside the other artifacts. It must include the six required sections, every explicit target and CPM management scope, concrete conflict impacts, the aggregate package comparison, risk level, follow-ups, artifact usage, and the name of every shared `.props`/`.targets` file inspected or changed. In the final response, mention those shared files, the risk level, and how any conditional references and target frameworks were preserved. Avoid rewriting the report after validation unless verification finds an omission or incorrect evidence.
 
 ## Required conversion artifacts
 
-Preserve all five deliverables; they are not temporary files:
+Preserve the report and every target's four evidence files; they are not temporary files. For one target, the five deliverables are:
 
 - `baseline.binlog`
 - `after-cpm.binlog`
 - `baseline-packages.json`
 - `after-cpm-packages.json`
 - `convert-to-cpm.md`
+
+For multiple targets, replace the four fixed evidence names with unique target-keyed pairs such as `baseline-api.binlog`, `after-cpm-api.binlog`, `baseline-packages-api.json`, and `after-cpm-packages-api.json`. Keep one aggregate `convert-to-cpm.md`.
 
 ## Efficiency rules
 
@@ -147,10 +150,10 @@ Preserve all five deliverables; they are not temporary files:
 
 ## Validation
 
-- [ ] Baseline and converted builds succeeded and both binlogs exist
+- [ ] Baseline and converted builds succeeded for every explicit target and all target binlogs exist
 - [ ] Every managed `PackageReference` has no `Version`, or intentionally uses `VersionOverride`
 - [ ] Every managed package has the correct central `PackageVersion`
 - [ ] Conditions and non-version metadata were preserved
 - [ ] Before/after package comparison contains no unexplained changes
 - [ ] Inlined version properties have neither remaining `$()` references nor obsolete XML definitions
-- [ ] All five required artifacts exist
+- [ ] The report and all per-target baseline and converted artifacts exist

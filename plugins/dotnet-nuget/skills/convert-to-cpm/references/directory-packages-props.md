@@ -2,11 +2,13 @@
 
 ## Placement
 
-- **Repository scope**: Place at the first common ancestor directory of all in-scope .NET projects. This may not be the repository root — many repos nest source code under `src/` or similar directories.
+- **Repository scope**: First group projects by the central version policy they must share. If all in-scope projects share one policy, place one file at their first common ancestor. If independent solutions or existing nearest-file boundaries require separate policies, place one file at each group's first common ancestor. This may produce one or more files, and none must be at the repository root.
 - **Solution scope**: Place in the solution directory.
 - **Single project scope**: Default to the project directory. If the project is inside a repository with other projects that may be converted later, ask the user where to place it.
 
 Only the nearest `Directory.Packages.props` is evaluated per project. CPM also supports `Directory.Packages.props` in sub-folders — for example, test projects may have different dependencies than source code and can use a separate `Directory.Packages.props` in their sub-folder. A `Directory.Packages.props` in a sub-folder does not implicitly override or extend a parent file; it is independent and replaces the parent for projects in that folder. To share settings, explicitly chain files using MSBuild `<Import>` elements. See [Central Package Management rules](https://github.com/NuGet/docs.microsoft.com-nuget/blob/main/docs/consume-packages/Central-Package-Management.md#central-package-management-rules) for how NuGet resolves which file applies. When in doubt about placement, ask the user.
+
+CLI targets and CPM management scopes are different concepts. Multiple solution or project targets can use one common `Directory.Packages.props`, while one repository conversion can require separate files for independent project groups. Compute placement from the projects that share policy, not from the number or location of solution files.
 
 ## Creating the file
 

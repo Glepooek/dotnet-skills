@@ -7,6 +7,8 @@ Create `convert-to-cpm.md` beside the baseline and converted artifacts. The repo
 Include:
 
 - Scope and projects converted
+- Every explicit project or solution CLI target used for baseline and validation
+- Each `Directory.Packages.props` path and the projects governed by that management scope
 - Number of unique packages centralized
 - Projects or packages skipped, with reasons
 - MSBuild version properties inlined, retained, or removed
@@ -24,7 +26,7 @@ State which projects resolve a different version after conversion. If no conflic
 
 ## 3. Package comparison: baseline vs. result
 
-Use `baseline-packages.json` and `after-cpm-packages.json` to produce two tables.
+Use every target's baseline and post-conversion package snapshots to produce two aggregate tables. Deduplicate projects that occur in overlapping targets.
 
 **Changes**
 
@@ -69,8 +71,8 @@ These are follow-ups, not additional work to perform during the CPM conversion.
 
 List:
 
-- `baseline.binlog` and `after-cpm.binlog` for manual MSBuild comparison and troubleshooting
-- `baseline-packages.json` and `after-cpm-packages.json` for machine-readable resolved-package comparison
+- The single-target or target-keyed baseline and post-conversion binlog pairs for manual MSBuild comparison and troubleshooting
+- The single-target or target-keyed baseline and post-conversion package JSON pairs for machine-readable resolved-package comparison
 - `convert-to-cpm.md` as the shareable conversion record
 
 End with any user action required before merge.

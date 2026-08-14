@@ -4,7 +4,14 @@ Verify the CPM conversion is version-neutral by comparing resolved package versi
 
 ## Capturing package lists
 
-Use the same explicit project or solution target for every command. Always build from a clean state first.
+Use the same explicit project or solution targets before and after conversion. A directory scope can require multiple targets to cover all projects. Always build each target from a clean state first.
+
+Create a stable, unique `<target-key>` from each target's relative path when more than one target exists. Use it in that target's artifact names so one target cannot overwrite another:
+
+- One target: `baseline.binlog`, `after-cpm.binlog`, `baseline-packages.json`, and `after-cpm-packages.json`.
+- Multiple targets: `baseline-<target-key>.binlog`, `after-cpm-<target-key>.binlog`, `baseline-packages-<target-key>.json`, and `after-cpm-packages-<target-key>.json`.
+
+Complete the full baseline sequence for every target before editing any file. Complete the full post-conversion sequence for every target after all edits.
 
 Run `dotnet --version` once from the scope directory and select the package-list syntax by SDK version instead of probing with commands that may fail:
 
@@ -16,40 +23,40 @@ Run `dotnet --version` once from the scope directory and select the package-list
 
 If `dotnet --version` fails, do not try roll-forward overrides, install an SDK, create a temporary `global.json`, or invoke SDK assemblies directly. Report the SDK required by the existing `global.json` or project and stop.
 
-### Baseline (before conversion)
+### Baseline for each target (before conversion)
 
 ```bash
 dotnet clean <scope>
 dotnet restore <scope>
-dotnet build <scope> --no-restore -bl:baseline.binlog
+dotnet build <scope> --no-restore -bl:<baseline-binlog>
 ```
 
 Then run exactly one package-list command for the active SDK:
 
 ```bash
 # SDK 10 or later
-dotnet package list --project <scope> --format json --include-transitive --no-restore > baseline-packages.json
+dotnet package list --project <scope> --format json --include-transitive --no-restore > <baseline-packages>
 
 # SDK 7.0.200 through 9.x
-dotnet list <scope> package --format json --include-transitive --no-restore > baseline-packages.json
+dotnet list <scope> package --format json --include-transitive --no-restore > <baseline-packages>
 ```
 
-### Post-conversion (after all changes)
+### Post-conversion for each target (after all changes)
 
 ```bash
 dotnet clean <scope>
 dotnet restore <scope>
-dotnet build <scope> --no-restore -bl:after-cpm.binlog
+dotnet build <scope> --no-restore -bl:<after-binlog>
 ```
 
 Then run exactly one package-list command for the active SDK:
 
 ```bash
 # SDK 10 or later
-dotnet package list --project <scope> --format json --include-transitive --no-restore > after-cpm-packages.json
+dotnet package list --project <scope> --format json --include-transitive --no-restore > <after-packages>
 
 # SDK 7.0.200 through 9.x
-dotnet list <scope> package --format json --include-transitive --no-restore > after-cpm-packages.json
+dotnet list <scope> package --format json --include-transitive --no-restore > <after-packages>
 ```
 
 Do not try both package-list forms after the SDK version has been determined.
@@ -63,7 +70,7 @@ Keep normal output small:
 
 ## Producing the comparison
 
-Compare `baseline-packages.json` and `after-cpm-packages.json` per project. For each project, identify:
+Compare each target's baseline and post-conversion package files, then aggregate results by project. Deduplicate projects that appeared in overlapping targets. For each project, identify:
 
 1. **Version changes**: Packages whose resolved version differs.
 2. **Added packages**: Packages present after conversion but not in the baseline.
@@ -100,8 +107,8 @@ If there are no changes at all, state that the conversion is fully version-neutr
 
 MSBuild binary logs (binlogs) are captured alongside the package list snapshots as supplementary artifacts. Inform the user they are available for manual validation and troubleshooting if needed:
 
-- `baseline.binlog` — Build state before CPM conversion
-- `after-cpm.binlog` — Build state after CPM conversion
+- `baseline.binlog` and `after-cpm.binlog` — Build state before and after a single-target conversion
+- Target-keyed binlog pairs — Build state before and after each target in a multi-target conversion
 
 The user can learn more about MSBuild binary logs from:
 - [Troubleshoot and create logs for MSBuild problems](https://learn.microsoft.com/visualstudio/ide/msbuild-logs?view=visualstudio#provide-msbuild-binary-logs-for-investigation)
