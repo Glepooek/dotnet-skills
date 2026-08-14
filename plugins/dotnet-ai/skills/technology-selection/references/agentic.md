@@ -9,6 +9,7 @@ agents. Built **on top of** Microsoft.Extensions.AI — never hand-roll a tool l
 <PackageReference Include="Microsoft.Extensions.AI" Version="9.*" />
 <PackageReference Include="Microsoft.Agents.AI" Version="1.*-*" />  <!-- prerelease: dotnet add --prerelease -->
 <PackageReference Include="Azure.AI.OpenAI" Version="2.*" />        <!-- or another MEAI provider -->
+<PackageReference Include="Azure.Identity" Version="1.*" />
 ```
 
 ## Guardrails

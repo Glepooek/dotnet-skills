@@ -28,20 +28,7 @@ Use for semantic search and retrieval-augmented Q&A over documents. Two concerns
 
 ```csharp
 var queryEmbedding = await embeddingGenerator.GenerateAsync(question, ct);
-var hits = await collection.SearchAsync(queryEmbedding, top: 5, new() { }, ct);
+var hits = await collection.SearchAsync(queryEmbedding, 5, new(), ct);
 var grounded = hits.Where(h => h.Score >= 0.75);   // minimum similarity threshold
 // build prompt with the grounded chunks + their source ids for attribution, then IChatClient.GetResponseAsync
 ```
-
-## Planning checklist (for plan-only / architecture requests — write no code)
-
-Decompose the request into capability needs and name the technology for each:
-
-- **Chat** — Microsoft.Extensions.AI (`IChatClient`) + a concrete provider (Azure.AI.OpenAI / OpenAI).
-- **Ingestion** — parse and **chunk** documents (Microsoft.Extensions.AI.DataIngestion).
-- **Embedding** — `IEmbeddingGenerator`; cache the resulting **embedding** vectors.
-- **Vector store** — Microsoft.Extensions.VectorData with the provider the user asked for
-  (e.g. pgvector on PostgreSQL).
-- **UI / infra** — honor the frameworks and storage the user specified (e.g. Blazor, a file folder);
-  do not substitute or add infrastructure they did not request.
-- Use only real, existing NuGet packages — do not hallucinate package names.

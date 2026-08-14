@@ -8,6 +8,7 @@ task needs tools/agent loops, use `references/agentic.md` instead.
 ```xml
 <PackageReference Include="Microsoft.Extensions.AI" Version="9.*" />
 <PackageReference Include="Azure.AI.OpenAI" Version="2.*" />   <!-- or OpenAI / Azure.AI.Inference / OllamaSharp -->
+<PackageReference Include="Azure.Identity" Version="1.*" />
 <PackageReference Include="Microsoft.ML.Tokenizers" Version="2.*" />  <!-- client-side token budgeting -->
 ```
 
@@ -31,7 +32,6 @@ builder.Services.AddChatClient(sp =>
     new AzureOpenAIClient(new Uri(cfg["Ai:Endpoint"]!), new DefaultAzureCredential())
         .GetChatClient("gpt-4o-2024-08-06").AsIChatClient()
         .AsBuilder()
-        .UseFunctionInvocation()
         .Use(inner => new RetryingChatClient(inner, maxRetries: 3))
         .Build());
 
