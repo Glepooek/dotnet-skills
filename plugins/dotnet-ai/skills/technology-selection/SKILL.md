@@ -61,10 +61,10 @@ Every answer — plan or implementation — must address the guardrails for the 
   hand-rolled loop); set `MaximumIterations` and a token/cost ceiling; define each tool with a clear
   schema (`AIFunctionFactory.Create`); log each step (never raw sensitive content).
 - **RAG / embeddings** — semantic **chunking** (not fixed-size); `IEmbeddingGenerator` and **cache
-  the embeddings** (don't re-embed per query); store/query with `Microsoft.Extensions.VectorData`
-  (MEVD) + the provider the user asked for (e.g. pgvector); filter by a **minimum similarity score**;
-  keep **source attribution** for each answer. Honor the UI/storage the user specified; use only
-  real, existing NuGet packages.
+  the embeddings** (don't re-embed per query); store/query with
+  `Microsoft.Extensions.VectorData.Abstractions` (MEVD) + the provider the user asked for (e.g.
+  pgvector); filter by a **minimum similarity score**; keep **source attribution** for each answer.
+  Honor the UI/storage the user specified; use only real, existing NuGet packages.
 
 **Then choose depth:**
 

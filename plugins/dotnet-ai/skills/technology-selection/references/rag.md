@@ -14,8 +14,8 @@ Use for semantic search and retrieval-augmented Q&A over documents. Two concerns
 
 ## Guardrails
 
-1. **Abstractions** — `IEmbeddingGenerator` for embeddings, `Microsoft.Extensions.VectorData` (MEVD)
-   for the store, `IChatClient` for generation.
+1. **Abstractions** — `IEmbeddingGenerator` for embeddings,
+   `Microsoft.Extensions.VectorData.Abstractions` (MEVD) for the store, `IChatClient` for generation.
 2. **Semantic chunking** — chunk on paragraph/semantic boundaries, not naive fixed-size cuts.
    Use `Microsoft.Extensions.AI.DataIngestion` (or equivalent parse/chunk) for PDFs/markdown.
 3. **Relevance threshold** — filter retrieved chunks by a **minimum similarity score**; don't feed
@@ -24,11 +24,11 @@ Use for semantic search and retrieval-augmented Q&A over documents. Two concerns
 5. **Cache embeddings** — persist embeddings; never re-embed the corpus on every query. Batch
    embedding calls during ingestion.
 
-## Minimal query shape
+## Minimal query shape (provider-specific pseudocode)
 
 ```csharp
 var queryEmbedding = await embeddingGenerator.GenerateAsync(question, ct);
-var hits = await collection.SearchAsync(queryEmbedding, 5, new(), ct);
+var hits = await SearchProviderAsync(queryEmbedding, top: 5, cancellationToken: ct);
 var grounded = hits.Where(h => h.Score >= 0.75);   // minimum similarity threshold
 // build prompt with the grounded chunks + their source ids for attribution, then IChatClient.GetResponseAsync
 ```
