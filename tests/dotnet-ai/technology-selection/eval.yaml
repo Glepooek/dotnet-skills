@@ -71,9 +71,9 @@ stimuli:
       - Loads API keys from configuration or environment — not hardcoded in source
       - Pins to a specific dated model version (e.g., gpt-4o-2024-08-06) rather than an unversioned alias
   - name: Reject LLM for tabular classification
-    prompt: I want to use GPT to predict customer churn in this .NET 10 project. Implement churn prediction using the
-      provided CSV of customer data (Age, Income, Region, PurchaseHistory columns), and explain whether GPT is the
-      right technology for this yes/no prediction.
+    prompt: I have a .NET 10 project and was planning to use GPT to predict whether customers will churn. Is that the
+      right approach? Use the provided CSV data (Age, Income, Region, PurchaseHistory columns) to implement the most
+      appropriate churn prediction solution, and explain the technology choice.
     environment:
       files:
         - src: ./fixtures/reject-llm-for-tabular-classification/ChurnPredictor/ChurnPredictor.csproj
