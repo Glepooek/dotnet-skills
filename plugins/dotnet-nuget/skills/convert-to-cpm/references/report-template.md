@@ -1,6 +1,6 @@
 # CPM Conversion Report
 
-Create `convert-to-cpm.md` beside the baseline and converted artifacts. The report must be self-contained and suitable for a pull request or team review. Use compact evidence extracted from the package snapshots; do not load raw JSON again solely to write prose.
+Create `convert-to-cpm.md` with the baseline and converted artifacts in their common artifact directory. The report must be self-contained and suitable for a pull request or team review. Use compact evidence extracted from the package snapshots; do not load raw JSON again solely to write prose.
 
 ## 1. Conversion overview
 

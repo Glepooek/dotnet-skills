@@ -171,9 +171,11 @@ stimuli:
       - type: prompt
     rubric:
       - Selected both independent projects as explicit CLI targets instead of asking the user to choose only one
+      - Ran each target from its own project directory or other directory that establishes its applicable SDK context
       - Captured a separate baseline build, binlog, and package snapshot for each project before making changes
       - Created one Directory.Packages.props at the requested common repository scope and centralized both package versions
       - Validated both independent projects after conversion and preserved separate target-keyed evidence artifacts
+      - Stored every target-keyed evidence artifact and one aggregate conversion report in a common artifact directory
       - Produced one aggregate conversion report that maps both targets to the common CPM management scope
   - name: Convert solution with MSBuild property versions to CPM
     prompt: Convert moderate-msbuild-properties/Platform.sln to Central Package Management. The package versions are

@@ -23,7 +23,7 @@ Centralize package versions in `Directory.Packages.props` while preserving proje
 Do this before running builds or changing files.
 
 1. **Guard mode** -- If any in-scope project uses `packages.config`, stop. Explain that CPM requires `PackageReference` and recommend migrating first. Do not create or modify files.
-2. **Package-maintenance mode** -- A request to update, align, bump, or sync packages authorizes those package edits, not CPM conversion. Audit the named scope, resolve the requested versions, update existing project/shared version declarations, and restore/build every affected CLI target. Ask only when the version or alignment policy is ambiguous. Do not create or modify `Directory.Packages.props`, remove versions for CPM, or capture conversion artifacts. Complete the package work, then recommend CPM as the durable follow-up.
+2. **Package-maintenance mode** -- A request to update, align, bump, or sync packages authorizes those package edits, not CPM conversion. Audit the named scope, resolve the requested versions, update existing project/shared version declarations, and restore/build every affected CLI target from the directory that establishes its applicable `global.json`. Ask only when the version or alignment policy is ambiguous. Do not create or modify `Directory.Packages.props`, remove versions for CPM, or capture conversion artifacts. Complete the package work, then recommend CPM as the durable follow-up.
 3. **Conversion mode** -- Use only when the user explicitly asks to adopt, enable, or convert to CPM. Follow the workflow below.
 
 If the scope is unclear, ask once before proceeding.
@@ -41,7 +41,7 @@ This plan is an efficiency default, not a hard cap. Never omit an in-scope proje
 | Input | Required | Rule |
 |-------|----------|------|
 | Scope | Yes | Project, solution, or directory containing the projects to inspect or convert |
-| Conflict strategy | For conversion with conflicts | If the user already supplied a strategy such as "use the highest version," apply it without asking again and record its impact. Otherwise stop after the audit and ask before editing. |
+| Conflict strategy | For package maintenance or conversion with conflicts | If the user already supplied a strategy such as "use the highest version," apply it without asking again and record its impact. Otherwise stop after the audit and ask before editing. |
 
 ## Read references only when needed
 
@@ -64,12 +64,13 @@ Never preload all references.
 - Determine CPM management scopes separately from CLI targets. Group projects that will share one central version policy and place one `Directory.Packages.props` at each group's first common ancestor, while respecting existing nearest-file boundaries. Multiple CLI targets can share one CPM file; independent project groups can require separate files.
 - Check for `packages.config`; if found, switch to Guard mode and stop.
 - Check the scope and ancestors for `Directory.Packages.props`. If CPM is already fully enabled, report that and stop. If a partial file exists, preserve it and ask only when its intended scope is ambiguous.
-- Run all .NET commands from the resolved scope directory, not from an unrelated parent workspace.
+- Choose one common artifact directory within the resolved scope, normally the targets' first common ancestor. Use explicit paths into it for every binlog, package snapshot, and the report.
+- Run each target's .NET commands from its solution/project directory or another directory that establishes its applicable `global.json`, not from an unrelated parent workspace.
 - Do not inspect unrelated projects or host-tool configuration when the user supplied a scope.
 
 ### 2. Capture the baseline
 
-Read [baseline-comparison.md](references/baseline-comparison.md). From the scope directory, determine the active SDK once and select the documented command syntax from that version. If SDK resolution fails or the SDK cannot process the requested solution format, stop and report the prerequisite; do not alter the host SDK or repository SDK policy unless the user asks.
+Read [baseline-comparison.md](references/baseline-comparison.md). For each target, determine the active SDK once from that target's command directory and select the documented command syntax for that version. If SDK resolution fails or the SDK cannot process the requested solution format, stop and report the prerequisite; do not alter the host SDK or repository SDK policy unless the user asks.
 
 Then use one command batch to:
 
@@ -145,7 +146,7 @@ For multiple targets, replace the four fixed evidence names with unique target-k
 - Batch independent reads and edits when supported.
 - Keep full build logs and package JSON out of the conversation; return compact summaries and artifact paths.
 - Do not repeat successful commands or reread successful output.
-- Do not perform package upgrades, broad outdated/deprecated scans, repeated tests, or unrelated repository exploration. The single conditional vulnerability query and test run defined above are part of complete high-risk conversion validation.
+- In conversion mode, do not perform package upgrades, broad outdated/deprecated scans, repeated tests, or unrelated repository exploration. The single conditional vulnerability query and test run defined above are part of complete high-risk conversion validation. Package maintenance can perform the requested upgrades and one scoped version-discovery query needed to resolve them.
 - Do not install or remove an SDK, create a temporary SDK selector, change roll-forward policy, invoke SDK-internal assemblies, kill unrelated processes, or clean host tooling/temp infrastructure. Report an environment prerequisite and stop.
 
 ## Validation

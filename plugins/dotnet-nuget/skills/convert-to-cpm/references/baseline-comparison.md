@@ -4,24 +4,26 @@ Verify the CPM conversion is version-neutral by comparing resolved package versi
 
 ## Capturing package lists
 
-Use the same explicit project or solution targets before and after conversion. A directory scope can require multiple targets to cover all projects. Always build each target from a clean state first.
+Use the same explicit project or solution targets before and after conversion. A directory scope can require multiple targets to cover all projects. Choose one common artifact directory within the resolved scope and use explicit paths into it from every target's command directory. Always build each target from a clean state first.
 
-Create a stable, unique `<target-key>` from each target's relative path when more than one target exists. Use it in that target's artifact names so one target cannot overwrite another:
+Create a stable, unique `<target-key>` from each target's path relative to the common artifact directory when more than one target exists. Use it in that target's artifact names so one target cannot overwrite another:
 
 - One target: `baseline.binlog`, `after-cpm.binlog`, `baseline-packages.json`, and `after-cpm-packages.json`.
 - Multiple targets: `baseline-<target-key>.binlog`, `after-cpm-<target-key>.binlog`, `baseline-packages-<target-key>.json`, and `after-cpm-packages-<target-key>.json`.
 
 Complete the full baseline sequence for every target before editing any file. Complete the full post-conversion sequence for every target after all edits.
 
-Run `dotnet --version` once from the scope directory and select the package-list syntax by SDK version instead of probing with commands that may fail:
+Run `dotnet --version` once from each target's command directory and select that target's package-list syntax by SDK version instead of probing with commands that may fail:
 
-- SDK 10 or later: use `dotnet package list --project <scope> --format json --no-restore`.
-- SDK 7.0.200 through 9.x: use `dotnet list <scope> package --format json --no-restore`.
+- SDK 10 or later: use `dotnet package list --project <scope> --format json --include-transitive --no-restore`.
+- SDK 7.0.200 through 9.x: use `dotnet list <scope> package --format json --include-transitive --no-restore`.
 - SDK older than 7.0.200 cannot produce the required JSON snapshots; stop and report that SDK 7.0.200 or later is required for this workflow.
 - For a single project when the working directory contains exactly that project, the target may be omitted.
 - A `.slnx` scope requires SDK 9.0.201 or later so build, restore, and package-list operations all support the format. If it is unsupported, stop and report the prerequisite.
 
 If `dotnet --version` fails, do not try roll-forward overrides, install an SDK, create a temporary `global.json`, or invoke SDK assemblies directly. Report the SDK required by the existing `global.json` or project and stop.
+
+Set `<baseline-binlog>`, `<after-binlog>`, `<baseline-packages>`, and `<after-packages>` below to explicit paths in the common artifact directory, using the target-keyed names when applicable.
 
 ### Baseline for each target (before conversion)
 
