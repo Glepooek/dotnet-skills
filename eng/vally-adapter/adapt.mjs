@@ -76,6 +76,11 @@ const { values: opts } = parseArgs({
     // by `skill-validator overfitting`. When provided, each verdict is annotated
     // with its matching overfittingResult (keyed by `${plugin}/${skill}`).
     overfitting: { type: "string" },
+    // Optional newline-delimited or JSON-array manifest of eval files selected by
+    // the workflow before execution. When supplied, every listed eval receives a
+    // results.json, including an explicit invalid verdict if a variant or compare
+    // result is missing.
+    "expected-evals": { type: "string" },
     help: { type: "boolean", default: false },
   },
   strict: true,
@@ -103,6 +108,8 @@ Options:
   --overfitting <file>      Optional JSON file from 'skill-validator overfitting'
                             (array of {plugin, skill, overfittingResult}). Merged
                             onto each verdict as verdict.overfittingResult.
+  --expected-evals <file>   Optional newline-delimited or JSON-array manifest of
+                            eval files that must each produce an explicit verdict.
   --help                    Show this help`);
   process.exit(opts.help ? 0 : 1);
 }
@@ -149,6 +156,34 @@ const SIGN_TEST_ALPHA = 0.05;
 // considerably more. eng/eval-quality/check_eval_quality.py enforces the same
 // number against eval specs before they are ever run.
 const MIN_CREDIBLE_TRIALS = 5;
+
+const VERDICT_STATES = Object.freeze({
+  VALID_PASS: "VALID_PASS",
+  VALID_REGRESSION: "VALID_REGRESSION",
+  VALID_NO_CHANGE: "VALID_NO_CHANGE",
+  INVALID_INCONCLUSIVE: "INVALID_INCONCLUSIVE",
+});
+
+function normalizeEvalFile(file) {
+  return String(file ?? "")
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\.\//, "");
+}
+
+function loadExpectedEvalFiles(file) {
+  if (!file) return [];
+  const text = readFileSync(resolve(file), "utf-8").trim();
+  if (!text) return [];
+  let values;
+  if (text.startsWith("[")) {
+    values = JSON.parse(text);
+    if (!Array.isArray(values)) throw new Error("--expected-evals JSON must be an array");
+  } else {
+    values = text.split(/\r?\n/);
+  }
+  return [...new Set(values.map(normalizeEvalFile).filter(Boolean))].sort();
+}
 
 // ---------------------------------------------------------------------------
 // JSONL loading + provenance
@@ -290,7 +325,7 @@ function readNonActivationStimuli(evalFile, repoRoot) {
 }
 
 function evalFileOf(record) {
-  return record.experiment?.evalFile ?? record.evalFilePath ?? "";
+  return normalizeEvalFile(record.experiment?.evalFile ?? record.evalFilePath ?? "");
 }
 
 function groupByEval(records) {
@@ -483,6 +518,170 @@ function trialDirection(trial) {
   return typeof score === "number" ? Math.sign(score) : 0;
 }
 
+function classifyComparisonError(evidence) {
+  const text = String(evidence ?? "");
+  if (/session\.idle|waiting for session\.idle/i.test(text)) {
+    return {
+      phase: "comparison_judge",
+      kind: "transient",
+      code: "judge_session_idle_timeout",
+      message: text,
+    };
+  }
+  if (/organization.{0,80}disabled|disabled.{0,80}organization/i.test(text)) {
+    return {
+      phase: "comparison_judge",
+      kind: "permanent",
+      code: "judge_organization_disabled",
+      message: text,
+    };
+  }
+  if (/\b429\b|rate.?limit|throttl/i.test(text)) {
+    return {
+      phase: "comparison_judge",
+      kind: "transient",
+      code: "judge_rate_limited",
+      message: text,
+    };
+  }
+  if (/\b5\d\d\b|service unavailable|internal server error/i.test(text)) {
+    return {
+      phase: "comparison_judge",
+      kind: "transient",
+      code: "judge_service_error",
+      message: text,
+    };
+  }
+  return {
+    phase: "comparison_judge",
+    kind: "unknown",
+    code: "comparison_judge_error",
+    message: text || "Comparison judge failed without error evidence",
+  };
+}
+
+function comparisonTrialKey(stimulusName, trial) {
+  const trialIndex = trial?.trialIndex;
+  if (trialIndex == null) return null;
+  return JSON.stringify([stimulusName ?? "", trialIndex]);
+}
+
+function summarizeComparisonTrials(report, invalidateInterval = false) {
+  const counted = [];
+  let erroredCount = 0;
+  for (const stimulus of report.stimuli ?? []) {
+    const trials = stimulus.trials ?? [];
+    const stimulusCounted = trials.filter((trial) => !trial.errored);
+    erroredCount += trials.length - stimulusCounted.length;
+    counted.push(...stimulusCounted);
+    stimulus.meanScore = mean(stimulusCounted.map((trial) => trial.score)) ?? 0;
+  }
+  const wins = counted.filter((trial) => trialDirection(trial) > 0).length;
+  const losses = counted.filter((trial) => trialDirection(trial) < 0).length;
+  const ties = counted.length - wins - losses;
+  report.summary = {
+    ...(report.summary ?? {}),
+    trialCount: counted.length,
+    erroredCount,
+    meanScore: mean(counted.map((trial) => trial.score)) ?? 0,
+    wins,
+    ties,
+    losses,
+    winRate: counted.length ? wins / counted.length : 0,
+    ...(invalidateInterval
+      ? { ciLow: null, ciHigh: null, mcnemar: null, metricDeltas: null }
+      : {}),
+  };
+  return report;
+}
+
+/**
+ * Merge a retry without replacing successful first-attempt judgments.
+ *
+ * Vally compares a full slice at a time, so a retry necessarily returns another
+ * full report. Only errored first-attempt slots are eligible for replacement;
+ * every successful first-attempt slot remains frozen.
+ */
+function mergeComparisonReports(primaryReport, retryReport) {
+  const report = structuredClone(primaryReport);
+  const retryTrials = new Map();
+  for (const stimulus of retryReport?.stimuli ?? []) {
+    for (const trial of stimulus.trials ?? []) {
+      const key = comparisonTrialKey(stimulus.stimulusName, trial);
+      if (key !== null) retryTrials.set(key, trial);
+    }
+  }
+
+  const recoveredErrors = [];
+  const persistentErrors = [];
+  let frozenSuccesses = 0;
+  let retriedSlots = 0;
+  for (const stimulus of report.stimuli ?? []) {
+    stimulus.trials = (stimulus.trials ?? []).map((trial, index) => {
+      if (!trial.errored) {
+        frozenSuccesses++;
+        return { ...trial, comparisonAttempt: trial.comparisonAttempt ?? 1 };
+      }
+
+      retriedSlots++;
+      const error = classifyComparisonError(trial.evidence);
+      const retryKey = comparisonTrialKey(stimulus.stimulusName, trial);
+      const retry = retryKey === null ? undefined : retryTrials.get(retryKey);
+      if (retry && !retry.errored) {
+        recoveredErrors.push({
+          stimulusName: stimulus.stimulusName,
+          trialIndex: trial.trialIndex ?? index,
+          attempts: 2,
+          ...error,
+        });
+        return {
+          ...retry,
+          comparisonAttempt: 2,
+          recoveredFrom: error,
+        };
+      }
+
+      const retryError = retry?.errored
+        ? classifyComparisonError(retry.evidence)
+        : {
+            phase: "comparison_judge",
+            kind: "unknown",
+            code: "retry_result_missing",
+            message: "Comparison retry did not return the planned trial slot",
+          };
+      persistentErrors.push({
+        stimulusName: stimulus.stimulusName,
+        trialIndex: trial.trialIndex ?? index,
+        attempts: 2,
+        attemptHistory: [
+          { attempt: 1, ...error },
+          { attempt: 2, ...retryError },
+        ],
+      });
+      return {
+        ...trial,
+        comparisonAttempt: 2,
+        retryError,
+      };
+    });
+  }
+
+  report.retrySummary = {
+    attempts: 2,
+    retriedSlots,
+    recoveredSlots: recoveredErrors.length,
+    frozenSuccesses,
+    recoveredErrors,
+    persistentErrors,
+  };
+  // Retry-only unmatched records are ignored because no successful first-attempt
+  // slot can be invalidated by a retry. An original errored slot that the retry
+  // cannot match remains errored through `retry_result_missing`.
+  report.unmatchedBaseline = [...new Set(primaryReport.unmatchedBaseline ?? [])];
+  report.unmatchedTreatment = [...new Set(primaryReport.unmatchedTreatment ?? [])];
+  return summarizeComparisonTrials(report, recoveredErrors.length > 0);
+}
+
 /**
  * Run `vally compare` in two-run mode over one eval's baseline vs skilled
  * slices and return the parsed comparison record (or null on failure).
@@ -508,8 +707,19 @@ function runCompare(baselineSlice, skilledSlice, outFile) {
 
 function runCompareWithRetry(baselineSlice, skilledSlice, outFile) {
   const report = runCompare(baselineSlice, skilledSlice, outFile);
-  const errorCount = report?.summary?.erroredCount ?? 0;
-  if (errorCount === 0) return report;
+  if (!report) return null;
+  const errorCount = report.summary?.erroredCount ?? 0;
+  if (errorCount === 0) {
+    report.retrySummary = {
+      attempts: 1,
+      retriedSlots: 0,
+      recoveredSlots: 0,
+      frozenSuccesses: report?.summary?.trialCount ?? 0,
+      recoveredErrors: [],
+      persistentErrors: [],
+    };
+    return report;
+  }
 
   warn(`vally compare returned ${errorCount} errored trial(s); retrying once`);
 
@@ -517,18 +727,53 @@ function runCompareWithRetry(baselineSlice, skilledSlice, outFile) {
   try {
     retryReport = runCompare(baselineSlice, skilledSlice, `${outFile}.retry`);
   } catch (err) {
-    warn(`vally compare retry failed; keeping the original result (${err instanceof Error ? err.message : String(err)})`);
+    const detail = err instanceof Error ? err.message : String(err);
+    warn(`vally compare retry failed; keeping the original result (${detail})`);
+    const retryError = {
+      phase: "comparison_judge",
+      kind: "unknown",
+      code: "comparison_retry_invocation_failed",
+      message: detail,
+    };
+    const persistentErrors = [];
+    for (const stimulus of report.stimuli ?? []) {
+      for (const [index, trial] of (stimulus.trials ?? []).entries()) {
+        if (!trial.errored) continue;
+        const firstAttempt = classifyComparisonError(trial.evidence);
+        trial.comparisonAttempt = 2;
+        trial.retryError = retryError;
+        persistentErrors.push({
+          stimulusName: stimulus.stimulusName,
+          trialIndex: trial.trialIndex ?? index,
+          attempts: 2,
+          attemptHistory: [
+            { attempt: 1, ...firstAttempt },
+            { attempt: 2, ...retryError },
+          ],
+        });
+      }
+    }
+    report.retrySummary = {
+      attempts: 2,
+      retriedSlots: errorCount,
+      recoveredSlots: 0,
+      frozenSuccesses: report?.summary?.trialCount ?? 0,
+      recoveredErrors: [],
+      persistentErrors,
+      retryInvocationError: detail,
+    };
     return report;
   }
 
-  const retryErrorCount = retryReport?.summary?.erroredCount ?? Number.POSITIVE_INFINITY;
-  if (retryErrorCount < errorCount) {
-    warn(`vally compare retry reduced errored trials from ${errorCount} to ${retryErrorCount}`);
-    return retryReport;
+  const merged = mergeComparisonReports(report, retryReport);
+  const mergedErrorCount = merged?.summary?.erroredCount ?? errorCount;
+  if (mergedErrorCount < errorCount) {
+    warn(`vally compare retry reduced errored trials from ${errorCount} to ${mergedErrorCount} without replacing successful judgments`);
+    return merged;
   }
 
   warn(`vally compare retry did not reduce errored trials; keeping the original result`);
-  return report;
+  return merged;
 }
 
 // ---------------------------------------------------------------------------
@@ -536,6 +781,7 @@ function runCompareWithRetry(baselineSlice, skilledSlice, outFile) {
 // ---------------------------------------------------------------------------
 
 function pct(x) {
+  if (typeof x !== "number" || !Number.isFinite(x)) return "—";
   return `${(x * 100).toFixed(1)}%`;
 }
 
@@ -629,6 +875,8 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
 
     const scenario = {
       scenarioName: name,
+      runCount: counted.length,
+      direction: sWins > sLosses ? "better" : sLosses > sWins ? "worse" : "none",
       // The scenario's contribution to the verdict, on the gate's own basis.
       netWin: counted.length ? (sWins - sLosses) / counted.length : 0,
       wins: sWins,
@@ -661,6 +909,64 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
     }
     return scenario;
   });
+
+  // Repeated runs measure within-stimulus reliability, not independent task
+  // breadth. This report-only statistic gives every stimulus one directional
+  // vote so consumers can see the effective cross-scenario evidence without
+  // changing the current trial-level gate.
+  const scenarioDirections = scenarios
+    .filter((scenario) => scenario.runCount > 0)
+    .map((scenario) => (scenario.direction === "better" ? 1 : scenario.direction === "worse" ? -1 : 0));
+  const scenarioWins = scenarioDirections.filter((value) => value > 0).length;
+  const scenarioLosses = scenarioDirections.filter((value) => value < 0).length;
+  const scenarioTies = scenarioDirections.length - scenarioWins - scenarioLosses;
+  const scenarioDirection =
+    scenarioWins > scenarioLosses ? "better" : scenarioLosses > scenarioWins ? "worse" : "none";
+  const scenarioPValue =
+    scenarioDirection === "worse"
+      ? signTestPValue(scenarioLosses, scenarioWins)
+      : signTestPValue(scenarioWins, scenarioLosses);
+  const scenarioEvidence = {
+    gateEligible: false,
+    reason: "Report-only: repeated runs are collapsed to one directional vote per stimulus",
+    count: scenarioDirections.length,
+    wins: scenarioWins,
+    ties: scenarioTies,
+    losses: scenarioLosses,
+    discordant: scenarioWins + scenarioLosses,
+    direction: scenarioDirection,
+    netWin: scenarioDirections.length
+      ? (scenarioWins - scenarioLosses) / scenarioDirections.length
+      : 0,
+    pValue: scenarioPValue,
+    alpha: SIGN_TEST_ALPHA,
+  };
+
+  // Vally compare currently exposes aggregate per-arm pass booleans. They are
+  // useful telemetry, but may include LLM grader results, so they are explicitly
+  // not eligible for a hard completion gate.
+  const completionTransitions = {
+    gateEligible: false,
+    source: "vally_compare_aggregate_pass",
+    bothPassed: 0,
+    baselineOnly: 0,
+    treatmentOnly: 0,
+    neitherPassed: 0,
+    unknown: 0,
+  };
+  for (const trial of (report.stimuli ?? []).flatMap((stimulus) => stimulus.trials ?? [])) {
+    if (trial.errored || typeof trial.baselinePassed !== "boolean" || typeof trial.treatmentPassed !== "boolean") {
+      completionTransitions.unknown++;
+    } else if (trial.baselinePassed && trial.treatmentPassed) {
+      completionTransitions.bothPassed++;
+    } else if (trial.baselinePassed) {
+      completionTransitions.baselineOnly++;
+    } else if (trial.treatmentPassed) {
+      completionTransitions.treatmentOnly++;
+    } else {
+      completionTransitions.neitherPassed++;
+    }
+  }
 
   const sweep = directions.length > 0 && wins === directions.length;
   // The sign test conditions on the discordant (non-tie) trials, so this — not
@@ -705,14 +1011,71 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
     `${s.erroredCount ? `, ${s.erroredCount} errored` : ""}` +
     `${unmatchedTrialCount ? `, ${unmatchedTrialCount} unmatched` : ""} — ${credibility}`;
 
+  const unresolvedErrors = (report.stimuli ?? []).flatMap((stimulus) =>
+    (stimulus.trials ?? [])
+      .map((trial, index) => ({ trial, index }))
+      .filter(({ trial }) => trial.errored)
+      .map(({ trial, index }) => ({
+        ...(() => {
+          const firstAttempt = classifyComparisonError(trial.evidence);
+          const finalAttempt = trial.retryError ?? firstAttempt;
+          const attempts = trial.comparisonAttempt ?? report.retrySummary?.attempts ?? 1;
+          return {
+            stimulusName: stimulus.stimulusName,
+            trialIndex: trial.trialIndex ?? index,
+            attempts,
+            ...finalAttempt,
+            attemptHistory:
+              attempts > 1
+                ? [
+                    { attempt: 1, ...firstAttempt },
+                    { attempt: 2, ...finalAttempt },
+                  ]
+                : [{ attempt: 1, ...firstAttempt }],
+          };
+        })(),
+      })),
+  );
+  const recoveredErrors = report.retrySummary?.recoveredErrors ?? [];
+
+  let state;
+  let stateReason;
+  if (!conclusive) {
+    state = VERDICT_STATES.INVALID_INCONCLUSIVE;
+    stateReason =
+      unresolvedErrors.length > 0
+        ? { code: "comparison_judge_error", phase: "comparison_judge" }
+        : unmatchedTrialCount > 0
+          ? { code: "unmatched_trajectories", phase: "comparison_pairing" }
+          : { code: "comparison_summary_mismatch", phase: "adapter" };
+  } else if (underpowered) {
+    state = VERDICT_STATES.INVALID_INCONCLUSIVE;
+    stateReason = { code: "underpowered", phase: "eval_design" };
+  } else if (passed) {
+    state = VERDICT_STATES.VALID_PASS;
+    stateReason = { code: "credible_preference_improvement", phase: "decision" };
+  } else if (regressed) {
+    // A credible ordinal preference loss is useful triage evidence, but it is
+    // not an objective task-completion regression. Keep the legacy `regressed`
+    // field for compatibility and make the new state explicit about that limit.
+    state = VERDICT_STATES.VALID_NO_CHANGE;
+    stateReason = { code: "preference_regression_report_only", phase: "decision" };
+  } else {
+    state = VERDICT_STATES.VALID_NO_CHANGE;
+    stateReason = { code: "no_credible_preference_change", phase: "decision" };
+  }
+
   return {
     skillName: identity.skill,
     skillPath: identity.skillPath,
+    state,
+    stateReason,
     conclusive,
     underpowered,
     minCredibleTrials: MIN_CREDIBLE_TRIALS,
     passed,
     regressed,
+    preferenceRegressed: regressed,
     // The deciding statistic: (wins - losses) / trials as the effect size, and
     // an exact one-sided sign test over the discordant trials as its
     // credibility. Magnitude-free, so it cannot reverse when the judge upgrades
@@ -743,13 +1106,34 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
     unmatchedTreatment,
     mcnemar: s.mcnemar,
     metricDeltas: s.metricDeltas,
+    scenarioEvidence,
+    completionTransitions,
+    comparisonAttempts: report.retrySummary ?? {
+      attempts: 1,
+      retriedSlots: 0,
+      recoveredSlots: 0,
+      frozenSuccesses: directions.length,
+      recoveredErrors: [],
+      persistentErrors: [],
+    },
+    errors: unresolvedErrors,
+    recoveredErrors,
     scenarios,
     reason,
   };
 }
 
 function verdictSummaryLine(v) {
-  const icon = !v.conclusive || v.underpowered ? "⚠️" : v.passed ? "✅" : "❌";
+  const icon =
+    v.state === VERDICT_STATES.INVALID_INCONCLUSIVE || !v.conclusive || v.underpowered
+      ? "⚠️"
+      : v.state === VERDICT_STATES.VALID_REGRESSION
+        ? "🔻"
+        : v.passed
+          ? "✅"
+          : v.preferenceRegressed
+            ? "📉"
+            : "❌";
   // Ordered and signed by net win, on the same basis as the verdict, so a line
   // can never point ▼ for a scenario contributing a positive net win.
   const scenarios = v.scenarios
@@ -760,6 +1144,102 @@ function verdictSummaryLine(v) {
     )
     .join("\n");
   return `${icon} ${v.skillName}: ${v.reason}${scenarios ? "\n" + scenarios : ""}`;
+}
+
+function invalidVerdict(identity, cause, message, accounting = {}) {
+  const error = {
+    phase: cause.phase,
+    kind: cause.kind ?? "permanent",
+    code: cause.code,
+    message,
+  };
+  return {
+    skillName: identity.skill,
+    skillPath: identity.skillPath,
+    state: VERDICT_STATES.INVALID_INCONCLUSIVE,
+    stateReason: { code: cause.code, phase: cause.phase },
+    conclusive: false,
+    underpowered: false,
+    minCredibleTrials: MIN_CREDIBLE_TRIALS,
+    passed: false,
+    regressed: false,
+    preferenceRegressed: false,
+    netWin: 0,
+    signTest: {
+      wins: 0,
+      ties: 0,
+      losses: 0,
+      discordant: 0,
+      direction: "none",
+      pValue: 1,
+      alpha: SIGN_TEST_ALPHA,
+    },
+    scenarioEvidence: {
+      gateEligible: false,
+      reason: "No complete comparison was available",
+      count: 0,
+      wins: 0,
+      ties: 0,
+      losses: 0,
+      discordant: 0,
+      direction: "none",
+      netWin: 0,
+      pValue: 1,
+      alpha: SIGN_TEST_ALPHA,
+    },
+    completionTransitions: {
+      gateEligible: false,
+      source: "vally_compare_aggregate_pass",
+      bothPassed: 0,
+      baselineOnly: 0,
+      treatmentOnly: 0,
+      neitherPassed: 0,
+      unknown: 0,
+    },
+    comparisonAttempts: {
+      attempts: 0,
+      retriedSlots: 0,
+      recoveredSlots: 0,
+      frozenSuccesses: 0,
+      recoveredErrors: [],
+      persistentErrors: [],
+    },
+    meanScore: null,
+    confidenceInterval: { low: null, high: null, level: 0.95 },
+    winRate: 0,
+    wins: 0,
+    ties: 0,
+    losses: 0,
+    trialCount: 0,
+    erroredCount: 0,
+    unmatchedTrialCount: 0,
+    unmatchedBaseline: [],
+    unmatchedTreatment: [],
+    mcnemar: null,
+    metricDeltas: [],
+    scenarios: [],
+    errors: [error],
+    recoveredErrors: [],
+    accounting,
+    reason: message,
+  };
+}
+
+function writeVerdictResults(outputRoot, evalFile, identity, verdict, expectedEval) {
+  const results = {
+    schemaVersion: 2,
+    evalFile,
+    model: opts.model,
+    judgeModel: opts["judge-model"],
+    timestamp: new Date().toISOString(),
+    expectedEval,
+    verdicts: [verdict],
+  };
+  const evalOutDir = join(outputRoot, identity.plugin, identity.skill);
+  mkdirSync(evalOutDir, { recursive: true });
+  const outputPath = join(evalOutDir, "results.json");
+  writeFileSync(outputPath, JSON.stringify(results, null, 2));
+  return outputPath;
 }
 
 // ---------------------------------------------------------------------------
@@ -773,8 +1253,8 @@ function main() {
   const skilledFile = join(runDir, opts["skilled-variant"], "results.jsonl");
   const pluginFile = join(runDir, opts["plugin-variant"], "results.jsonl");
 
-  const baselineRecords = loadJsonlFile(baselineFile);
-  const skilledRecords = loadJsonlFile(skilledFile);
+  const baselineRecords = existsSync(baselineFile) ? loadJsonlFile(baselineFile) : [];
+  const skilledRecords = existsSync(skilledFile) ? loadJsonlFile(skilledFile) : [];
   const hasPlugin = existsSync(pluginFile);
   const pluginRecords = hasPlugin ? loadJsonlFile(pluginFile) : [];
   console.log(
@@ -791,27 +1271,80 @@ function main() {
   // empty map => verdict.overfittingResult stays null (byte-identical output).
   const overfittingMap = loadOverfittingMap(opts.overfitting);
 
-  // Union of evals seen in either variant so an eval that dropped out of one is
-  // surfaced rather than silently disappearing.
-  const allEvals = [...new Set([...baselineByEval.keys(), ...skilledByEval.keys()])].sort();
+  const expectedManifestProvided = Boolean(opts["expected-evals"]);
+  const expectedEvals = loadExpectedEvalFiles(opts["expected-evals"]);
+  const expectedSet = new Set(expectedEvals);
+  const observedEvals = [...new Set([...baselineByEval.keys(), ...skilledByEval.keys()])].map(
+    normalizeEvalFile,
+  );
+  const observedSet = new Set(observedEvals);
+  const missingEvals = expectedEvals.filter((evalFile) => !observedSet.has(evalFile));
+  // Include the declared manifest first so an eval missing from both variants
+  // still receives an explicit invalid result instead of disappearing.
+  const allEvals = [...new Set([...expectedEvals, ...observedEvals])].sort();
 
   const workDir = mkdtempSync(join(tmpdir(), "vally-adapt-"));
   let written = 0;
   let incomplete = 0;
+  const invalidEvals = [];
+  const unexpectedEvals = [];
   try {
     for (const evalFile of allEvals) {
       const { skill, plugin, skillPath } = evalIdentity(evalFile);
+      const identity = { skill, plugin, skillPath };
+      const expectedEval = !expectedManifestProvided || expectedSet.has(normalizeEvalFile(evalFile));
       const skilled = skilledByEval.get(evalFile) ?? [];
       const baseline = baselineByEval.get(evalFile) ?? [];
       const pluginRecs = pluginByEval.get(evalFile) ?? [];
 
+      if (!expectedEval) {
+        unexpectedEvals.push(evalFile);
+      }
+      if (skilled.length === 0 && baseline.length === 0) {
+        const message = `${plugin}/${skill}: baseline and skilled variants produced no records`;
+        warn(message);
+        const verdict = invalidVerdict(
+          identity,
+          { code: "missing_baseline_and_skilled_records", phase: "executor" },
+          message,
+          { baselineRecords: 0, skilledRecords: 0, pluginRecords: pluginRecs.length },
+        );
+        const outputPath = writeVerdictResults(outputRoot, evalFile, identity, verdict, expectedEval);
+        console.log(`\n${verdictSummaryLine(verdict)}\n  → ${outputPath}`);
+        invalidEvals.push(evalFile);
+        written++;
+        incomplete++;
+        continue;
+      }
       if (skilled.length === 0) {
-        warn(`${plugin}/${skill}: skilled variant produced no records — no verdict written`);
+        const message = `${plugin}/${skill}: skilled variant produced no records`;
+        warn(message);
+        const verdict = invalidVerdict(
+          identity,
+          { code: "missing_skilled_records", phase: "executor" },
+          message,
+          { baselineRecords: baseline.length, skilledRecords: 0, pluginRecords: pluginRecs.length },
+        );
+        const outputPath = writeVerdictResults(outputRoot, evalFile, identity, verdict, expectedEval);
+        console.log(`\n${verdictSummaryLine(verdict)}\n  → ${outputPath}`);
+        invalidEvals.push(evalFile);
+        written++;
         incomplete++;
         continue;
       }
       if (baseline.length === 0) {
-        warn(`${plugin}/${skill}: baseline variant produced no records — cannot compare, no verdict written`);
+        const message = `${plugin}/${skill}: baseline variant produced no records — cannot compare`;
+        warn(message);
+        const verdict = invalidVerdict(
+          identity,
+          { code: "missing_baseline_records", phase: "executor" },
+          message,
+          { baselineRecords: 0, skilledRecords: skilled.length, pluginRecords: pluginRecs.length },
+        );
+        const outputPath = writeVerdictResults(outputRoot, evalFile, identity, verdict, expectedEval);
+        console.log(`\n${verdictSummaryLine(verdict)}\n  → ${outputPath}`);
+        invalidEvals.push(evalFile);
+        written++;
         incomplete++;
         continue;
       }
@@ -826,12 +1359,35 @@ function main() {
       try {
         report = runCompareWithRetry(baselineSlice, skilledSlice, compareOut);
       } catch (err) {
-        warn(`${plugin}/${skill}: vally compare failed — no verdict written (${err instanceof Error ? err.message : String(err)})`);
+        const detail = err instanceof Error ? err.message : String(err);
+        const message = `${plugin}/${skill}: vally compare failed (${detail})`;
+        warn(message);
+        const verdict = invalidVerdict(
+          identity,
+          { code: "comparison_invocation_failed", phase: "comparison_judge", kind: "unknown" },
+          message,
+          { baselineRecords: baseline.length, skilledRecords: skilled.length, pluginRecords: pluginRecs.length },
+        );
+        const outputPath = writeVerdictResults(outputRoot, evalFile, identity, verdict, expectedEval);
+        console.log(`\n${verdictSummaryLine(verdict)}\n  → ${outputPath}`);
+        invalidEvals.push(evalFile);
+        written++;
         incomplete++;
         continue;
       }
       if (!report) {
-        warn(`${plugin}/${skill}: vally compare produced no comparison record — no verdict written`);
+        const message = `${plugin}/${skill}: vally compare produced no comparison record`;
+        warn(message);
+        const verdict = invalidVerdict(
+          identity,
+          { code: "comparison_record_missing", phase: "comparison_judge", kind: "unknown" },
+          message,
+          { baselineRecords: baseline.length, skilledRecords: skilled.length, pluginRecords: pluginRecs.length },
+        );
+        const outputPath = writeVerdictResults(outputRoot, evalFile, identity, verdict, expectedEval);
+        console.log(`\n${verdictSummaryLine(verdict)}\n  → ${outputPath}`);
+        invalidEvals.push(evalFile);
+        written++;
         incomplete++;
         continue;
       }
@@ -853,27 +1409,36 @@ function main() {
 
       const verdict = comparisonToVerdict(
         report,
-        { skill, plugin, skillPath },
+        identity,
         roles,
         readNonActivationStimuli(evalFile, opts["repo-root"]),
       );
+      if (!expectedEval) {
+        verdict.state = VERDICT_STATES.INVALID_INCONCLUSIVE;
+        verdict.stateReason = { code: "unexpected_eval", phase: "adapter" };
+        verdict.conclusive = false;
+        verdict.passed = false;
+        verdict.regressed = false;
+        verdict.preferenceRegressed = false;
+        verdict.errors.push({
+          phase: "adapter",
+          kind: "permanent",
+          code: "unexpected_eval",
+          message: `${evalFile} was observed but was not in the expected-eval manifest`,
+        });
+        verdict.reason = `${verdict.reason}; observed eval was not in the expected-eval manifest`;
+      }
       // Only annotate when --overfitting was supplied, so output is
       // byte-identical to before when the flag is absent.
       if (opts.overfitting) {
         verdict.overfittingResult = overfittingMap.get(`${plugin}/${skill}`) ?? null;
       }
-      const results = {
-        model: opts.model,
-        judgeModel: opts["judge-model"],
-        timestamp: new Date().toISOString(),
-        verdicts: [verdict],
-      };
-
-      const evalOutDir = join(outputRoot, plugin, skill);
-      mkdirSync(evalOutDir, { recursive: true });
-      const outputPath = join(evalOutDir, "results.json");
-      writeFileSync(outputPath, JSON.stringify(results, null, 2));
+      const outputPath = writeVerdictResults(outputRoot, evalFile, identity, verdict, expectedEval);
       written++;
+      if (verdict.state === VERDICT_STATES.INVALID_INCONCLUSIVE) {
+        invalidEvals.push(evalFile);
+        incomplete++;
+      }
 
       console.log(`\n${verdictSummaryLine(verdict)}\n  → ${outputPath}`);
     }
@@ -882,6 +1447,27 @@ function main() {
   }
 
   const incompleteNote = incomplete > 0 ? ` (${incomplete} eval(s) incomplete — see warnings above)` : "";
+  mkdirSync(outputRoot, { recursive: true });
+  writeFileSync(
+    join(outputRoot, "adapter-summary.json"),
+    JSON.stringify(
+      {
+        schemaVersion: 1,
+        expectedManifestProvided,
+        expectedEvalCount: expectedEvals.length,
+        observedEvalCount: observedEvals.length,
+        writtenResultCount: written,
+        missingEvalCount: missingEvals.length,
+        unexpectedEvalCount: unexpectedEvals.length,
+        invalidEvalCount: invalidEvals.length,
+        missingEvals,
+        invalidEvals,
+        unexpectedEvals,
+      },
+      null,
+      2,
+    ),
+  );
   console.log(`\nWrote ${written} results.json file(s) under ${outputRoot}${incompleteNote}`);
 }
 
@@ -907,6 +1493,10 @@ export {
   splitVallyCommand,
   signTestPValue,
   trialDirection,
+  classifyComparisonError,
+  mergeComparisonReports,
+  loadExpectedEvalFiles,
+  VERDICT_STATES,
   MIN_CREDIBLE_TRIALS,
   SIGN_TEST_ALPHA,
 };

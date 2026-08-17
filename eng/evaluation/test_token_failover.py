@@ -343,9 +343,35 @@ esac
             run_script,
         )
         self.assertIn(
-            'echo "::error::vally produced no skill verdicts for $PLUGIN;',
+            'The result set is incomplete or contains an unexpected eval.',
             run_script,
         )
+        self.assertEqual(
+            run_script.count(
+                '--expected-evals "$RUNNER_TEMP/evaluation-expected-evals.txt"'
+            ),
+            2,
+        )
+        self.assertIn(
+            'if [ "$PRODUCED" -ne "$EXPECTED_EVAL_COUNT" ]',
+            run_script,
+        )
+        self.assertIn("s.expectedManifestProvided === true", run_script)
+        self.assertIn("s.unexpectedEvalCount === 0", run_script)
+        self.assertIn(
+            "Vally comparison watchdog expired after 45 minutes",
+            run_script,
+        )
+        self.assertNotIn(
+            "watchdog expired after 45 minutes; uploading partial results",
+            run_script,
+        )
+        find_script = by_name["Find eval specs"]["run"]
+        self.assertIn(
+            'printf \'%s\\n\' "$EVALS" > "$RUNNER_TEMP/evaluation-expected-evals.txt"',
+            find_script,
+        )
+        self.assertIn('echo "count=$EVAL_COUNT" >> "$GITHUB_OUTPUT"', find_script)
         self.assertIn(
             'grep -Eiq "$COPILOT_RATE_LIMIT_PATTERN" "$VALLY_LOG"',
             run_script,
@@ -361,6 +387,25 @@ esac
         self.assertIn(f"node {trusted_adapter}gen-experiment.mjs", run_script)
         self.assertIn(f"node {trusted_adapter}adapt.mjs", run_script)
         self.assertNotIn("node eng/vally-adapter/", run_script)
+
+    def test_result_consumers_use_explicit_verdict_states(self) -> None:
+        workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        steps = workflow["jobs"]["vally-evaluate"]["steps"]
+        summary_script = next(
+            step["run"] for step in steps if step.get("name") == "Write summary"
+        )
+        self.assertIn("INVALID_INCONCLUSIVE", summary_script)
+        self.assertIn("VALID_REGRESSION", summary_script)
+        self.assertIn("PREFERENCE_REGRESSED", summary_script)
+        self.assertNotIn("v.regressed ? 'VALID_REGRESSION'", summary_script)
+        self.assertIn("v.state == null", summary_script)
+
+        caller_text = CALLER_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("primaryState = $p.state", caller_text)
+        self.assertIn(
+            "$p.preferenceRegressed -eq $s.preferenceRegressed",
+            caller_text,
+        )
 
 
 if __name__ == "__main__":

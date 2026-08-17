@@ -6,7 +6,17 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { comparisonToVerdict, splitVallyCommand, signTestPValue, trialDirection, MIN_CREDIBLE_TRIALS, SIGN_TEST_ALPHA } from "./adapt.mjs";
+import {
+  comparisonToVerdict,
+  classifyComparisonError,
+  mergeComparisonReports,
+  splitVallyCommand,
+  signTestPValue,
+  trialDirection,
+  VERDICT_STATES,
+  MIN_CREDIBLE_TRIALS,
+  SIGN_TEST_ALPHA,
+} from "./adapt.mjs";
 
 const adapterPath = fileURLToPath(new URL("./adapt.mjs", import.meta.url));
 
@@ -44,6 +54,10 @@ const count = existsSync(statePath) ? Number(readFileSync(statePath, "utf8")) + 
 writeFileSync(statePath, String(count));
 if (mode === "fails") process.exit(3);
 const output = args[args.indexOf("--output") + 1];
+if (mode === "empty") {
+  writeFileSync(output, "");
+  process.exit(0);
+}
 const errored = mode === "persistent" || (mode === "recover" && count === 1);
 const unmatched = mode === "unmatched";
 // One winning trial per run of the single stimulus, all scored "slightly
@@ -89,9 +103,11 @@ writeFileSync(output, JSON.stringify(report) + "\\n");
 
 // Default to a trial count at the credibility floor so a test that isn't about
 // statistical power gets a verdict that can actually pass.
-function runAdapter(root, mode, trialCount = 5) {
+function runAdapter(root, mode, trialCount = 5, expectedEvalFiles = [evalFile]) {
   const runDir = createExperiment(root);
   const outputRoot = join(root, "output");
+  const expectedEvalsPath = join(root, "expected-evals.txt");
+  writeFileSync(expectedEvalsPath, `${expectedEvalFiles.join("\n")}\n`);
   const fakeVally = createFakeVally(root, mode, trialCount);
   const result = spawnSync(
     process.execPath,
@@ -103,6 +119,8 @@ function runAdapter(root, mode, trialCount = 5) {
       outputRoot,
       "--vally",
       fakeVally.command,
+      "--expected-evals",
+      expectedEvalsPath,
     ],
     { encoding: "utf8" },
   );
@@ -114,6 +132,7 @@ function runAdapter(root, mode, trialCount = 5) {
   );
   return {
     result,
+    outputRoot,
     compareCount: existsSync(fakeVally.statePath)
       ? Number(readFileSync(fakeVally.statePath, "utf8"))
       : undefined,
@@ -141,7 +160,9 @@ test("retries a transient comparison error once", () => {
     assert.equal(verdict.conclusive, true);
     assert.equal(verdict.underpowered, false);
     assert.equal(verdict.passed, true);
-    assert.match(result.stderr, /reduced errored trials from 5 to 0/);
+    assert.equal(verdict.state, VERDICT_STATES.VALID_PASS);
+    assert.equal(verdict.recoveredErrors.length, 5);
+    assert.match(result.stderr, /without replacing successful judgments/);
   });
 });
 
@@ -149,8 +170,20 @@ test("preserves adapter diagnostics when compare fails", () => {
   withTempDir((root) => {
     const { result, verdict } = runAdapter(root, "fails");
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(verdict, undefined);
+    assert.equal(verdict.state, VERDICT_STATES.INVALID_INCONCLUSIVE);
+    assert.equal(verdict.stateReason.code, "comparison_invocation_failed");
+    assert.equal(verdict.errors[0].phase, "comparison_judge");
     assert.match(result.stderr, /vally compare failed/);
+  });
+});
+
+test("classifies an empty compare output as a missing record", () => {
+  withTempDir((root) => {
+    const { result, verdict } = runAdapter(root, "empty");
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(verdict.state, VERDICT_STATES.INVALID_INCONCLUSIVE);
+    assert.equal(verdict.stateReason.code, "comparison_record_missing");
+    assert.doesNotMatch(verdict.errors[0].message, /Cannot set properties/);
   });
 });
 
@@ -162,6 +195,15 @@ test("keeps a persistent comparison error visible after one retry", () => {
     assert.equal(verdict.erroredCount, 5);
     assert.equal(verdict.conclusive, false);
     assert.equal(verdict.passed, false);
+    assert.equal(verdict.state, VERDICT_STATES.INVALID_INCONCLUSIVE);
+    assert.equal(verdict.errors.length, 5);
+    assert.equal(verdict.errors[0].phase, "comparison_judge");
+    assert.equal(verdict.errors[0].attempts, 2);
+    assert.deepEqual(
+      verdict.errors[0].attemptHistory.map((attempt) => attempt.attempt),
+      [1, 2],
+    );
+    assert.equal(verdict.comparisonAttempts.persistentErrors.length, 5);
     assert.match(verdict.reason, /inconclusive \(comparison errors\)/);
     assert.match(result.stderr, /did not reduce errored trials/);
   });
@@ -177,6 +219,8 @@ test("surfaces unmatched trajectories in the verdict", () => {
     assert.deepEqual(verdict.unmatchedTreatment, ["Treatment only (trial 0)"]);
     assert.equal(verdict.conclusive, false);
     assert.equal(verdict.passed, false);
+    assert.equal(verdict.state, VERDICT_STATES.INVALID_INCONCLUSIVE);
+    assert.equal(verdict.stateReason.code, "unmatched_trajectories");
     assert.match(verdict.reason, /2 unmatched.*inconclusive \(unmatched trajectories\)/);
   });
 });
@@ -191,6 +235,8 @@ test("reports a below-floor eval as underpowered rather than as a pass", () => {
     assert.equal(verdict.conclusive, true, "the comparison itself completed");
     assert.equal(verdict.underpowered, true);
     assert.equal(verdict.passed, false);
+    assert.equal(verdict.state, VERDICT_STATES.INVALID_INCONCLUSIVE);
+    assert.equal(verdict.stateReason.code, "underpowered");
     assert.equal(verdict.minCredibleTrials, 5);
     assert.match(verdict.reason, /underpowered \(1 counted trial\(s\); a credible verdict needs at least 5/);
     assert.match(verdict.reason, /won every one of them/);
@@ -204,8 +250,33 @@ test("passes once the eval reaches the credibility floor", () => {
     const { verdict } = runAdapter(root, "clean", 5);
     assert.equal(verdict.underpowered, false);
     assert.equal(verdict.passed, true);
+    assert.equal(verdict.state, VERDICT_STATES.VALID_PASS);
     assert.equal(verdict.trialCount, 5);
     assert.match(verdict.reason, /credibly better/);
+  });
+});
+
+test("writes an explicit invalid verdict for every expected eval", () => {
+  withTempDir((root) => {
+    const missingEval = "tests/dotnet-test/missing-skill/eval.yaml";
+    const { result, outputRoot } = runAdapter(root, "clean", 5, [evalFile, missingEval]);
+    assert.equal(result.status, 0, result.stderr);
+    const missingResult = JSON.parse(
+      readFileSync(join(outputRoot, "dotnet-test", "missing-skill", "results.json"), "utf8"),
+    );
+    assert.equal(missingResult.evalFile, missingEval);
+    assert.equal(missingResult.expectedEval, true);
+    assert.equal(missingResult.verdicts[0].state, VERDICT_STATES.INVALID_INCONCLUSIVE);
+    assert.equal(
+      missingResult.verdicts[0].stateReason.code,
+      "missing_baseline_and_skilled_records",
+    );
+
+    const summary = JSON.parse(readFileSync(join(outputRoot, "adapter-summary.json"), "utf8"));
+    assert.equal(summary.expectedEvalCount, 2);
+    assert.equal(summary.writtenResultCount, 2);
+    assert.deepEqual(summary.missingEvals, [missingEval]);
+    assert.deepEqual(summary.invalidEvals, [missingEval]);
   });
 });
 
@@ -256,6 +327,95 @@ function reportFromScores(scores, summaryOverrides = {}) {
 
 const gate = (scores, summaryOverrides) =>
   comparisonToVerdict(reportFromScores(scores, summaryOverrides), IDENTITY, EMPTY_ROLES, new Set());
+
+test("a retry fills only errored slots and freezes successful judgments", () => {
+  const primary = reportFromScores([null, 0.4, 0.4, 0.4, 0.4]);
+  primary.stimuli[0].trials[0] = {
+    trialIndex: 0,
+    score: 0,
+    winner: "tie",
+    errored: true,
+    evidence: "Comparison judge failed: Timeout after 120000ms waiting for session.idle",
+  };
+  primary.summary.trialCount = 4;
+  primary.summary.erroredCount = 1;
+  primary.summary.wins = 4;
+
+  // The retry recovers slot 0 but disagrees with every successful first-attempt
+  // slot. Only slot 0 may be taken from this report.
+  const retry = reportFromScores([0.4, -0.4, -0.4, -0.4, -0.4]);
+  const merged = mergeComparisonReports(primary, retry);
+  const directions = merged.stimuli[0].trials.map(trialDirection);
+
+  assert.deepEqual(directions, [1, 1, 1, 1, 1]);
+  assert.equal(merged.summary.erroredCount, 0);
+  assert.equal(merged.retrySummary.recoveredSlots, 1);
+  assert.equal(merged.retrySummary.frozenSuccesses, 4);
+  assert.equal(merged.summary.mcnemar, null);
+  assert.equal(merged.summary.metricDeltas, null);
+  assert.equal(
+    merged.retrySummary.recoveredErrors[0].code,
+    "judge_session_idle_timeout",
+  );
+});
+
+test("does not pair retry slots by array position when trialIndex is absent", () => {
+  const primary = reportFromScores([null, 0.4]);
+  primary.stimuli[0].trials[0].errored = true;
+  primary.summary.trialCount = 1;
+  primary.summary.erroredCount = 1;
+  primary.summary.wins = 1;
+  for (const trial of primary.stimuli[0].trials) delete trial.trialIndex;
+
+  const retry = reportFromScores([-0.4, 0.4]);
+  for (const trial of retry.stimuli[0].trials) delete trial.trialIndex;
+
+  const merged = mergeComparisonReports(primary, retry);
+  assert.equal(merged.summary.erroredCount, 1);
+  assert.equal(merged.retrySummary.recoveredSlots, 0);
+  assert.equal(
+    merged.retrySummary.persistentErrors[0].attemptHistory[1].code,
+    "retry_result_missing",
+  );
+});
+
+test("classifies the known judge-side failures that must not become skill losses", () => {
+  assert.equal(
+    classifyComparisonError("Timeout after 120000ms waiting for session.idle").code,
+    "judge_session_idle_timeout",
+  );
+  assert.equal(
+    classifyComparisonError("This organization has disabled this personal access token").code,
+    "judge_organization_disabled",
+  );
+  assert.equal(
+    classifyComparisonError("Request failed with status code 429: Too Many Requests").code,
+    "judge_rate_limited",
+  );
+});
+
+test("scenario evidence collapses repeated runs to one report-only vote", () => {
+  const verdict = gate([0.4, 0.4, 0.4, 0.4, 0.4]);
+  assert.equal(verdict.trialCount, 5);
+  assert.equal(verdict.scenarioEvidence.count, 1);
+  assert.equal(verdict.scenarioEvidence.wins, 1);
+  assert.equal(verdict.scenarioEvidence.pValue, 0.5);
+  assert.equal(verdict.scenarioEvidence.gateEligible, false);
+});
+
+test("aggregate completion transitions are telemetry, not a hard gate", () => {
+  const report = reportFromScores([-0.4, -0.4, -0.4, -0.4, -0.4]);
+  for (const trial of report.stimuli[0].trials) {
+    trial.baselinePassed = true;
+    trial.treatmentPassed = false;
+  }
+  const verdict = comparisonToVerdict(report, IDENTITY, EMPTY_ROLES, new Set());
+  assert.equal(verdict.completionTransitions.baselineOnly, 5);
+  assert.equal(verdict.completionTransitions.gateEligible, false);
+  assert.equal(verdict.preferenceRegressed, true);
+  assert.equal(verdict.state, VERDICT_STATES.VALID_NO_CHANGE);
+  assert.equal(verdict.stateReason.code, "preference_regression_report_only");
+});
 
 // The defect behind dotnet/skills#952: weighting the statistic by how decisive
 // each win was let the SAME win/tie/loss record reverse the verdict when the
@@ -341,6 +501,7 @@ test("a tie-starved record says no record could have passed, not that none did",
 
 test("the smallest record that does pass is five wins and no losses", () => {  const v = gate([0.4, 0.4, 0.4, 0.4, 0.4]);
   assert.equal(v.passed, true);
+  assert.equal(v.state, VERDICT_STATES.VALID_PASS);
   assert.equal(v.underpowered, false);
   assert.ok(v.signTest.pValue <= SIGN_TEST_ALPHA);
   assert.match(v.reason, /credibly better/);
@@ -363,6 +524,8 @@ test("losses sink a verdict, and a clean sweep of them is a credible regression"
   const swept = gate([-0.4, -0.4, -0.4, -0.4, -0.4]);
   assert.equal(swept.passed, false);
   assert.equal(swept.regressed, true);
+  assert.equal(swept.preferenceRegressed, true);
+  assert.equal(swept.state, VERDICT_STATES.VALID_NO_CHANGE);
   assert.match(swept.reason, /credibly worse/);
   assert.equal(gate([0.4, 0.4, 0.4, 0, 0, -1.0]).passed, false, "one loss among ties");
 });
@@ -393,6 +556,7 @@ test("a summary whose tie count is wrong is inconclusive", () => {
   report.summary.ties = 0;
   const verdict = comparisonToVerdict(report, IDENTITY, EMPTY_ROLES, new Set());
   assert.equal(verdict.conclusive, false);
+  assert.equal(verdict.state, VERDICT_STATES.INVALID_INCONCLUSIVE);
   assert.match(verdict.reason, /compare report inconsistent/);
 });
 
@@ -419,6 +583,7 @@ test("a summary that disagrees with its own trials is inconclusive, not underpow
   report.stimuli = [];
   const verdict = comparisonToVerdict(report, IDENTITY, EMPTY_ROLES, new Set());
   assert.equal(verdict.conclusive, false);
+  assert.equal(verdict.state, VERDICT_STATES.INVALID_INCONCLUSIVE);
   assert.equal(verdict.underpowered, false);
   assert.equal(verdict.passed, false);
   assert.match(verdict.reason, /compare report inconsistent/);
@@ -433,6 +598,7 @@ test("errored trials are excluded from the deciding statistic", () => {
   const verdict = comparisonToVerdict(report, IDENTITY, EMPTY_ROLES, new Set());
   assert.equal(verdict.signTest.wins, 4, "the errored trial is not counted");
   assert.equal(verdict.conclusive, false);
+  assert.equal(verdict.state, VERDICT_STATES.INVALID_INCONCLUSIVE);
   assert.equal(
     verdict.underpowered,
     false,

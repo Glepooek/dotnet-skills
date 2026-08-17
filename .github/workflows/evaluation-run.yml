@@ -307,9 +307,14 @@ jobs:
           if [ -z "$EVALS" ]; then
             echo "No eval.yaml files found for ${PLUGIN}"
             echo "has_evals=false" >> "$GITHUB_OUTPUT"
+            echo "count=0" >> "$GITHUB_OUTPUT"
+            : > "$RUNNER_TEMP/evaluation-expected-evals.txt"
           else
+            EVAL_COUNT=$(printf '%s\n' "$EVALS" | wc -l | tr -d ' ')
             echo "has_evals=true" >> "$GITHUB_OUTPUT"
-            echo "Found $(printf '%s\n' "$EVALS" | wc -l | tr -d ' ') eval specs"
+            echo "count=$EVAL_COUNT" >> "$GITHUB_OUTPUT"
+            printf '%s\n' "$EVALS" > "$RUNNER_TEMP/evaluation-expected-evals.txt"
+            echo "Found $EVAL_COUNT eval specs"
           fi
 
       - name: Resolve evaluation models
@@ -592,6 +597,7 @@ jobs:
           MODEL: ${{ steps.eval-models.outputs.model }}
           JUDGE_MODEL: ${{ steps.eval-models.outputs.judge-model }}
           JUDGE2_MODEL: ${{ steps.eval-models.outputs.judge2 }}
+          EXPECTED_EVAL_COUNT: ${{ steps.find-evals.outputs.count }}
           # ENTRY_MODEL is kept only to gate the static-experiment sed fallback
           # below (cross-family leg that failed plugin-variant generation).
           ENTRY_MODEL: ${{ matrix.entry.model }}
@@ -778,13 +784,15 @@ jobs:
               --output-root "$RESULTS_DIR" \
               --vally "vally" \
               --repo-root "$GITHUB_WORKSPACE" \
+              --expected-evals "$RUNNER_TEMP/evaluation-expected-evals.txt" \
               --model "$MODEL" \
               --judge-model "$JUDGE_MODEL" \
               "${OVERFIT_ARGS[@]}"
           ADAPT_STATUS=$?
           set -e
           if [ "$ADAPT_STATUS" -eq 124 ]; then
-            echo "::warning::Vally comparison watchdog expired after 45 minutes; uploading partial results"
+            echo "::error::Vally comparison watchdog expired after 45 minutes. Partial results will be uploaded, but the eval result set is invalid."
+            exit 124
           elif [ "$ADAPT_STATUS" -ne 0 ]; then
             echo "::error::Vally adapter exited unexpectedly with status $ADAPT_STATUS"
             exit "$ADAPT_STATUS"
@@ -807,6 +815,7 @@ jobs:
               --output-root "$RESULTS_DIR2" \
               --vally "vally" \
               --repo-root "$GITHUB_WORKSPACE" \
+              --expected-evals "$RUNNER_TEMP/evaluation-expected-evals.txt" \
               --model "$MODEL" \
               --judge-model "$JUDGE2_MODEL" \
               "${OVERFIT_ARGS[@]}" || echo "::warning::secondary judge ($JUDGE2_MODEL) re-score failed for $PLUGIN"
@@ -814,11 +823,35 @@ jobs:
 
           # Surface how many verdicts were produced.
           PRODUCED=$(find "$RESULTS_DIR" -name results.json -not -path "$EXPERIMENT_OUT/*" | wc -l | tr -d ' ')
-          echo "Produced $PRODUCED skill verdict(s) for $PLUGIN"
-          if [ "$PRODUCED" -eq 0 ]; then
-            echo "::error::vally produced no skill verdicts for $PLUGIN; evals failed to run or validate (see logs above)"
+          echo "Produced $PRODUCED of $EXPECTED_EVAL_COUNT expected skill verdict(s) for $PLUGIN"
+          if [ "$PRODUCED" -ne "$EXPECTED_EVAL_COUNT" ]; then
+            echo "::error::vally produced $PRODUCED result file(s), but the pre-run manifest required $EXPECTED_EVAL_COUNT. The result set is incomplete or contains an unexpected eval."
             exit 1
           fi
+          ADAPTER_SUMMARY="$RESULTS_DIR/adapter-summary.json"
+          if [ ! -f "$ADAPTER_SUMMARY" ] || ! node -e "
+            const s = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
+            const expected = Number(process.argv[2]);
+            const ok = s.expectedManifestProvided === true
+              && s.expectedEvalCount === expected
+              && s.writtenResultCount === expected
+              && s.unexpectedEvalCount === 0;
+            if (!ok) {
+              console.error(JSON.stringify(s));
+              process.exit(1);
+            }
+          " "$ADAPTER_SUMMARY" "$EXPECTED_EVAL_COUNT"; then
+            echo "::error::Adapter result accounting did not reconcile exactly with the pre-run eval manifest."
+            exit 1
+          fi
+          node -e "
+            const s = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
+            console.log('Result accounting: expected=' + s.expectedEvalCount
+              + ', written=' + s.writtenResultCount
+              + ', invalid=' + s.invalidEvalCount
+              + ', manifest-missing=' + s.missingEvalCount
+              + ', unexpected=' + s.unexpectedEvalCount);
+          " "$ADAPTER_SUMMARY"
 
       - name: Remove selected Copilot token
         if: always()
@@ -854,7 +887,7 @@ jobs:
         run: |
           echo "## 🔬 Vally Evaluation Results: $ENTRY_NAME" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Skilled vs baseline, judged head-to-head by \`vally compare\`. A skill passes only on a complete comparison with a credible net win — more wins than losses, by an exact one-sided sign test at p ≤ 0.05 — over enough trials for any record to reach that bar. ⚠️ marks a verdict that can't be reached: an underpowered eval, or a comparison that didn't complete." >> $GITHUB_STEP_SUMMARY
+          echo "Skilled vs baseline, judged head-to-head by \`vally compare\`. A skill passes only on a complete comparison with a credible net win — more wins than losses, by an exact one-sided sign test at p ≤ 0.05 — over enough trials for any record to reach that bar. ⚠️ marks an invalid or inconclusive result. 📉 marks a report-only LLM preference loss, not an objective completion regression." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           RESULTS_DIR="artifacts/TestResults/vally/$ENTRY_NAME"
@@ -862,19 +895,23 @@ jobs:
             if [ ! -f "$RESULTS_JSON" ]; then continue; fi
             EVAL_NAME=$(basename "$(dirname "$RESULTS_JSON")")
 
-            CONCLUSIVE=$(node -e "const r=JSON.parse(require('fs').readFileSync(process.argv[1],'utf-8')); console.log(r.verdicts[0].conclusive)" "$RESULTS_JSON")
-            UNDERPOWERED=$(node -e "const r=JSON.parse(require('fs').readFileSync(process.argv[1],'utf-8')); console.log(r.verdicts[0].underpowered === true)" "$RESULTS_JSON")
-            PASSED=$(node -e "const r=JSON.parse(require('fs').readFileSync(process.argv[1],'utf-8')); console.log(r.verdicts[0].passed)" "$RESULTS_JSON")
+            STATE=$(node -e "const r=JSON.parse(require('fs').readFileSync(process.argv[1],'utf-8')); const v=r.verdicts[0]; console.log(v.state ?? (v.conclusive === false || v.underpowered ? 'INVALID_INCONCLUSIVE' : v.passed ? 'VALID_PASS' : 'VALID_NO_CHANGE'))" "$RESULTS_JSON")
+            PREFERENCE_REGRESSED=$(node -e "const r=JSON.parse(require('fs').readFileSync(process.argv[1],'utf-8')); const v=r.verdicts[0]; console.log(v.preferenceRegressed === true || (v.regressed === true && (v.state == null || v.state === 'VALID_NO_CHANGE')))" "$RESULTS_JSON")
             REASON=$(node -e "const r=JSON.parse(require('fs').readFileSync(process.argv[1],'utf-8')); console.log(r.verdicts[0].reason)" "$RESULTS_JSON")
-            if [ "$CONCLUSIVE" != "true" ] || [ "$UNDERPOWERED" = "true" ]; then
+            if [ "$STATE" = "INVALID_INCONCLUSIVE" ]; then
               ICON="⚠️"
-            elif [ "$PASSED" = "true" ]; then
+            elif [ "$STATE" = "VALID_PASS" ]; then
               ICON="✅"
+            elif [ "$STATE" = "VALID_REGRESSION" ]; then
+              ICON="🔻"
+            elif [ "$PREFERENCE_REGRESSED" = "true" ]; then
+              ICON="📉"
             else
               ICON="❌"
             fi
 
             echo "### $ICON $EVAL_NAME" >> $GITHUB_STEP_SUMMARY
+            echo "State: \`$STATE\`" >> $GITHUB_STEP_SUMMARY
             echo "$REASON" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
 

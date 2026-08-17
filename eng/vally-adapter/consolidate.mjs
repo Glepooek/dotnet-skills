@@ -7,7 +7,8 @@
  *
  * Each results.json (written by adapt.mjs) has:
  *   { model, judgeModel, timestamp, verdicts: [ {
- *       skillName, passed, conclusive, underpowered, regressed,
+ *       skillName, state, stateReason, passed, conclusive, underpowered,
+ *       preferenceRegressed,
  *       netWin, signTest:{wins,ties,losses,discordant,pValue,alpha},  // the gate
  *       meanScore, confidenceInterval:{low,high},  // magnitude, triage only
  *       winRate, wins, ties, losses, trialCount, erroredCount, reason,
@@ -16,10 +17,10 @@
  *                      baseline:{judgeResult:{overallScore}} } ]
  *   } ] }
  *
- * A skill's verdict is head-to-head preference of skilled vs baseline (judged by
- * `vally compare`): it PASSES only on a credible net win — more wins than
- * losses by an exact one-sided sign test at 5% — over enough trials for any
- * record to reach that bar. Absolute per-role quality is shown for context.
+ * A skill passes only on a credible head-to-head preference improvement.
+ * Objective regression, no-change, and invalid evidence use distinct states.
+ * Absolute per-role quality and report-only reliability evidence are shown for
+ * context.
  *
  * Both formats render a table (Overfit + Skills Loaded columns included),
  * followed by a legend and a collapsible <details> per skill that carries the
@@ -112,6 +113,29 @@ function pct(x) {
   return `${x >= 0 ? "+" : ""}${(x * 100).toFixed(1)}%`;
 }
 
+const STATE = Object.freeze({
+  PASS: "VALID_PASS",
+  REGRESSION: "VALID_REGRESSION",
+  NO_CHANGE: "VALID_NO_CHANGE",
+  INVALID: "INVALID_INCONCLUSIVE",
+});
+
+function verdictState(verdict) {
+  if (Object.values(STATE).includes(verdict.state)) return verdict.state;
+  if (verdict.conclusive === false || verdict.underpowered === true) return STATE.INVALID;
+  if (verdict.passed === true) return STATE.PASS;
+  return STATE.NO_CHANGE;
+}
+
+function isPreferenceRegression(verdict) {
+  return verdict.preferenceRegressed === true
+    || (verdict.regressed === true && (verdict.state == null || verdict.state === STATE.NO_CHANGE));
+}
+
+function isObjectiveRegression(verdict) {
+  return verdictState(verdict) === STATE.REGRESSION;
+}
+
 // Escape a value for safe use inside a markdown table cell: literal pipes would
 // otherwise inject extra columns, and newlines would split the row.
 function td(x) {
@@ -198,29 +222,36 @@ for (const file of uniqueFiles) {
 
 verdicts.sort((a, b) => (a.skillName ?? "").localeCompare(b.skillName ?? ""));
 
-// A verdict is ⚠️ when it can't support a pass/fail either because the
-// comparison couldn't complete (errored/unmatched trials) or because the eval
-// has too few trials for any result to reach the alpha (`underpowered`).
-// Otherwise it improved (✅), got credibly worse (🔻), or changed nothing the
-// gate can call (❌). Mirrors adapt.mjs and the evaluation-run.yml summary.
+// Prefer schema-version-2 states. The fallback keeps historical result
+// artifacts readable.
 function isIndeterminate(v) {
-  return v.conclusive === false || v.underpowered === true;
+  return verdictState(v) === STATE.INVALID;
 }
 
 function resultIcon(v) {
   if (isIndeterminate(v)) return "⚠️";
-  if (v.passed) return "✅";
-  return v.regressed === true ? "🔻" : "❌";
+  if (verdictState(v) === STATE.PASS) return "✅";
+  if (isObjectiveRegression(v)) return "🔻";
+  return isPreferenceRegression(v) ? "📉" : "❌";
 }
 
-const passedCount = verdicts.filter((v) => v.passed).length;
+const passedCount = verdicts.filter((v) => verdictState(v) === STATE.PASS).length;
 const underpoweredCount = verdicts.filter(
-  (v) => v.conclusive !== false && v.underpowered === true,
+  (v) => isIndeterminate(v) && v.underpowered === true,
 ).length;
-const incompleteCount = verdicts.filter((v) => v.conclusive === false).length;
+const incompleteCount = verdicts.filter(
+  (v) => isIndeterminate(v) && v.underpowered !== true,
+).length;
 const indeterminateCount = underpoweredCount + incompleteCount;
-const regressedCount = verdicts.filter((v) => v.regressed === true).length;
-const failedCount = verdicts.length - passedCount - indeterminateCount - regressedCount;
+const regressedCount = verdicts.filter(isObjectiveRegression).length;
+const preferenceRegressedCount = verdicts.filter(
+  (v) => !isIndeterminate(v) && !isObjectiveRegression(v) && isPreferenceRegression(v),
+).length;
+const failedCount = verdicts.length
+  - passedCount
+  - indeterminateCount
+  - regressedCount
+  - preferenceRegressedCount;
 
 const isFull = opts.format === "full";
 
@@ -235,11 +266,12 @@ lines.push("");
 // the gate refused to judge because no possible result at its size can reach
 // p <= 0.05. Reporting those next to real failures reads as a wall of
 // regressions, which is the opposite of what happened — the skill was never
-// measured. `regressed` is called out separately for the same reason: "did
-// anything get worse?" should be answerable from the first line.
+// measured. Objective regressions and report-only preference losses are called
+// out separately.
 lines.push(
   `${verdicts.length} skill(s) evaluated — ✅ **${passedCount} improved**, ` +
-    `❌ **${failedCount} no credible change**, 🔻 **${regressedCount} regressed**.`,
+    `❌ **${failedCount} no credible change**, 🔻 **${regressedCount} objective regressions**, ` +
+    `📉 **${preferenceRegressedCount} preference losses (report only)**.`,
 );
 if (indeterminateCount > 0) {
   const parts = [];
@@ -259,7 +291,7 @@ if (indeterminateCount > 0) {
 lines.push("");
 lines.push(
   `A skill passes only on a credible net win over baseline: more wins than losses, by an exact ` +
-    `one-sided sign test at \`p ≤ 0.05\`.`,
+    `one-sided sign test at \`p ≤ 0.05\`. LLM preference losses are reported separately from objective completion regressions.`,
 );
 lines.push("");
 
@@ -302,7 +334,8 @@ if (verdicts.length === 0) {
   lines.push("- **Δ Pref** — the same comparison weighted by how decisive each win was (`much-better` ±100%, `slightly-better` ±40%). Reported for triage only: weighting the statistic by magnitude made a skill fail for winning *harder*, which is why the gate deliberately ignores this column.");
   lines.push("- **W/T/L** — wins / ties / losses across trials.");
   lines.push("- **⚠️** — the gate withheld a verdict. Either the eval has fewer trials than any result needs to reach `p ≤ 0.05` (**underpowered** — the skill was never actually measured, so this is not a regression; add scenarios or raise `defaults.runs`), or the comparison didn't complete.");
-  lines.push("- **🔻** — a credible *regression*: the losses themselves clear the same bar the gate uses for wins.");
+  lines.push("- **🔻** — an objective completion regression. This state is reserved for objective completion evidence.");
+  lines.push("- **📉** — a credible LLM preference loss. It is report-only and is not an objective completion regression.");
   lines.push("- **Quality / Baseline** — mean absolute judge score 0–5 (skilled isolated vs skill-free control).");
   if (isFull) {
     lines.push("- **Quality (Plugin)** — mean absolute judge score 0–5 for the whole-plugin run.");
@@ -325,14 +358,34 @@ if (verdicts.length === 0) {
   // eval-size problem.
   const COMMENT_BUDGET = 63000; // leave headroom for links the workflow appends
   const rank = (v) =>
-    isIndeterminate(v) ? 2 : v.passed ? 3 : v.regressed === true ? 0 : 1;
+    isIndeterminate(v) ? 2 : verdictState(v) === STATE.PASS ? 3 : isObjectiveRegression(v) ? 0 : 1;
   const detailBlocks = verdicts.map((v) => {
     const icon = resultIcon(v);
+    const errorCounts = new Map();
+    for (const error of v.errors ?? []) {
+      const code = error.code ?? "unknown_comparison_error";
+      errorCounts.set(code, (errorCounts.get(code) ?? 0) + 1);
+    }
     const block = [
       `<details><summary>${icon} ${td(v.skillName)} — details</summary>`,
       "",
+      `**State:** \`${verdictState(v)}\`${v.stateReason?.code ? ` (\`${td(v.stateReason.code)}\`)` : ""}`,
+      "",
       ...(v.reason ? [`**Reason:** ${td(v.reason)}`] : []),
       "",
+      ...(errorCounts.size > 0
+        ? [`**Comparison errors:** ${[...errorCounts.entries()].map(([code, count]) => `\`${td(code)}\`=${count}`).join(", ")}`, ""]
+        : []),
+      ...((v.recoveredErrors?.length ?? 0) > 0
+        ? [`**Retry recovery:** ${v.recoveredErrors.length} errored judgment slot(s) recovered; successful first-attempt judgments stayed fixed.`, ""]
+        : []),
+      ...(v.scenarioEvidence
+        ? [
+            `**Effective scenarios (report only):** ${v.scenarioEvidence.count} ` +
+              `(${v.scenarioEvidence.wins}W/${v.scenarioEvidence.ties}T/${v.scenarioEvidence.losses}L).`,
+            "",
+          ]
+        : []),
       ...scenarioTable(v),
       "",
       "</details>",
@@ -343,15 +396,12 @@ if (verdicts.length === 0) {
   let used = lines.join("\n").length;
   const keep = new Set();
   // Two-phase selection so a passing (✅) detail can never be shown while a
-  // higher-priority failing (❌) or inconclusive (⚠️) detail was dropped for size:
-  // fit as many high-priority blocks as possible first, and only surface passing
-  // blocks if every high-priority block fit. Within the high-priority set, failing
-  // (❌, rank 0) blocks are considered before inconclusive (⚠️, rank 1) ones so a
-  // ⚠️ block can't consume budget that a later ❌ block needs.
+  // higher-priority non-pass detail was dropped for size. Objective regressions
+  // come first, followed by no-change/preference-loss and invalid records.
   const highPriority = detailBlocks
-    .filter((d) => rank(d.v) < 2)
+    .filter((d) => rank(d.v) < 3)
     .sort((a, b) => rank(a.v) - rank(b.v));
-  const lowPriority = detailBlocks.filter((d) => rank(d.v) === 2);
+  const lowPriority = detailBlocks.filter((d) => rank(d.v) === 3);
   let droppedHighPriority = false;
   for (const d of highPriority) {
     if (used + d.len > COMMENT_BUDGET) {

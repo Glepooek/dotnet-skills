@@ -2,7 +2,7 @@
 
 This guide is for AI agents (and humans) investigating skill evaluation failures produced by the **Vally** harness via `eng/vally-adapter/adapt.mjs`. It documents the `results.json` schema, how to reach the raw Vally output, common failure patterns, and recommended fixes.
 
-Evaluations run through Vally (`@microsoft/vally-cli`): every skill's `tests/<plugin>/<skill>/eval.yaml` is run in up to three variants — **baseline** (no skills), **skilled** (only the skill under test), and **plugin** (the whole plugin loaded). The adapter then runs `vally compare` (a debiased, position-swapped head-to-head judgment of skilled vs baseline) and writes one `results.json` per skill.
+Evaluations run through Vally (`@microsoft/vally-cli`): every skill's `tests/<plugin>/<skill>/eval.yaml` is run in up to three variants — **baseline** (no skills), **skilled** (only the skill under test), and **plugin** (the whole plugin loaded). The workflow records the exact expected-eval manifest before execution. The adapter then runs `vally compare` (a debiased, position-swapped head-to-head judgment of skilled vs baseline) and writes one `results.json` per expected skill, including an explicit invalid result when required evidence is missing.
 
 > Note: the linter (`skill-validator check`) is a **separate** workflow (`skill-check.yml`) and is unrelated to these eval results.
 
@@ -14,7 +14,7 @@ When an evaluation has failures, the PR comment includes a ready-to-use prompt �
 
 1. **Download the results artifacts:** `gh run download <run-id> --repo dotnet/skills --pattern "vally-results-*" --dir ./eval-results`
 2. **Skim the run's step summary** (the "Full Results" link) for the consolidated pass/fail table.
-3. **Read each `results.json`** (`eval-results/vally-results-*/<plugin>/<skill>/results.json`) for the compare verdict and per-scenario metrics.
+3. **Read `adapter-summary.json` and each `results.json`** (`eval-results/vally-results-*/<plugin>/<skill>/results.json`). The summary proves expected-versus-produced accounting; each skill file gives the compare state and evidence.
 4. **Identify the failure pattern** using the categories below and fix in priority order: infra/errored trials → timeouts → activation → quality/preference.
 5. **Apply the fix** and re-run with `/evaluate`.
 
@@ -27,7 +27,7 @@ When an evaluation has failures, the PR comment includes a ready-to-use prompt �
 | Column | Meaning |
 |--------|---------|
 | `Skill` | Skill under test |
-| `Result` | ✅ credible net win / 🔻 credible regression / ❌ no credible change / ⚠️ the gate withheld a verdict (underpowered eval, or a comparison that errored, had unmatched trials, or contradicted itself) |
+| `Result` | ✅ `VALID_PASS` / 🔻 objective `VALID_REGRESSION` / ❌ `VALID_NO_CHANGE` / 📉 report-only LLM preference loss / ⚠️ `INVALID_INCONCLUSIVE` |
 | `Net win` | `(wins − losses) / trials`. **The deciding effect size** |
 | `p` | One-sided exact sign test over the discordant (non-tie) trials. A skill passes only at `p ≤ 0.05`, which needs at least 5 winning trials |
 | `Δ Pref` | The same comparison weighted by how decisive each win was (`much-better` ±100%, `slightly-better` ±40%). Triage only; deliberately not gated on |
@@ -36,7 +36,7 @@ When an evaluation has failures, the PR comment includes a ready-to-use prompt �
 | `Overfit` | Overfitting-judge severity — ✅ Low, 🟡 Moderate, 🔴 High, — none — with its score |
 | `Skills Loaded` | Of scenarios that expect activation, how many the skill activated / that total (plugin run shown when present); ⚠️ flags a scenario that expected activation but didn't activate |
 
-A collapsible **Column legend** and a per-skill **details** block follow the table. Each details block shows the verdict `reason` and a `Scenario | Mean preference | Trials (W/T/L)` table, so per-scenario detail is one click away in the PR itself. `--format full` (the step summary) adds the `Quality (Plugin)` column; `--format simple` (the PR comment) omits it. Both formats include the Overfit, Skills Loaded, legend, and details.
+A collapsible **Column legend** and a per-skill **details** block follow the table. Each details block shows `state`, `stateReason`, comparison-error codes, retry recovery, report-only effective-scenario evidence, the human-readable `reason`, and a per-scenario table. `--format full` (the step summary) adds the `Quality (Plugin)` column; `--format simple` (the PR comment) omits it.
 
 ## Understanding `results.json`
 
@@ -44,6 +44,8 @@ Each file has a top-level object:
 
 | Field | Description |
 |-------|-------------|
+| `schemaVersion` | Adapter schema version. Version 2 adds explicit states and evidence provenance |
+| `evalFile` / `expectedEval` | Normalized eval path and whether it was in the pre-run manifest |
 | `model` | Model used for agent runs |
 | `judgeModel` | Model used by `vally compare` |
 | `timestamp` | When results were written (UTC) |
@@ -51,15 +53,17 @@ Each file has a top-level object:
 
 ### Verdict structure
 
-A verdict carries **both** the head-to-head preference (what gates the PR) and absolute per-role data (what the dashboard charts).
+A verdict carries **both** the head-to-head preference and absolute per-role data. `state` is authoritative. Boolean fields remain for compatibility with older consumers.
 
 | Field | Description |
 |-------|-------------|
 | `skillName` / `skillPath` | The skill under test |
+| `state` | One of `VALID_PASS`, `VALID_REGRESSION`, `VALID_NO_CHANGE`, or `INVALID_INCONCLUSIVE` |
+| `stateReason` | Machine-readable `{ code, phase }`. Use this field for automation; do not parse `reason` |
 | `passed` | **The gate.** `true` only on a credible net win: more wins than losses at `signTest.pValue <= 0.05`, `conclusive`, and not `underpowered` |
 | `netWin` | `(wins − losses) / trials` — the effect size the gate reads. Magnitude-free, so an identical W/T/L record always yields an identical verdict |
 | `signTest` | `{ wins, ties, losses, discordant, pValue, alpha }` — exact one-sided binomial tail over the discordant (non-tie) trials. **This is what decides.** Ties can't support a win, so they hold `discordant` down |
-| `regressed` | `true` when the *losses* are credible by the same test — the mirror of `passed` |
+| `regressed` / `preferenceRegressed` | Compatibility and explicit fields for a credible LLM preference loss. Under schema version 2 this maps to `VALID_NO_CHANGE`, not `VALID_REGRESSION`, because ordinal LLM preference is not objective completion evidence. Renderers apply the same report-only meaning to legacy records that have `regressed: true` but no `state` |
 | `conclusive` | `false` when the comparison didn't complete: errored trials, unmatched trajectories, or a summary that disagrees with its own `stimuli[].trials` |
 | `underpowered` | `true` when a *completed* comparison counted fewer than `minCredibleTrials` trials, so no record could have reached `p <= 0.05`. Rendered ⚠️ — never a pass, never a regression. Disjoint from `conclusive` |
 | `minCredibleTrials` | The trial floor in force (5). See `eng/eval-quality/README.md` for why |
@@ -67,6 +71,10 @@ A verdict carries **both** the head-to-head preference (what gates the PR) and a
 | `confidenceInterval` | `{ low, high, level: 0.95 }` — the 95% CI on `meanScore`, reported alongside it |
 | `winRate`, `wins`, `ties`, `losses` | Trial-level head-to-head tally as vally reported it |
 | `trialCount`, `erroredCount` | Counted trials (scenarios × `defaults.runs`) and how many errored (errored trials don't count toward either statistic) |
+| `comparisonAttempts` | Retry telemetry. Successful first-attempt slots are frozen; only errored slots can be filled by attempt 2 |
+| `errors[]` / `recoveredErrors[]` | Structured unresolved and recovered comparison failures, with phase, code, stimulus, trial, and attempt provenance |
+| `scenarioEvidence` | One effective vote per stimulus after repeated runs are collapsed. Report-only (`gateEligible: false`) |
+| `completionTransitions` | Baseline/treatment aggregate pass transitions. Report-only because Vally aggregate pass can include LLM grading |
 | `reason` | Human-readable summary of the above |
 | `scenarios[]` | Per-scenario detail (below) |
 
@@ -88,6 +96,14 @@ Each scenario merges the compare preference for that stimulus with the absolute 
 
 `metrics` on each role: `{ wallTimeMs, tokenEstimate, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens }`.
 
+### Adapter summary
+
+`adapter-summary.json` is the result-set accounting record. It contains
+`expectedEvalCount`, `observedEvalCount`, `writtenResultCount`, `missingEvals`,
+`unexpectedEvals`, and `invalidEvals`. The workflow also checks that the number
+of primary result files equals the exact pre-run manifest count. A missing eval
+cannot disappear while unrelated results make the job look complete.
+
 ## Reaching the raw Vally output
 
 The adapter's `results.json` is a summary. The uploaded artifact also contains the full Vally run under `artifacts/TestResults/vally/<entry>/`:
@@ -101,8 +117,15 @@ To see exactly what the agent did for a failing scenario, open its `events.jsonl
 
 Work top-down; earlier categories often cause later ones.
 
-### 1. Errored or missing trials (`erroredCount > 0`, or a variant produced no records)
-The agent crashed, the model was unavailable, or the environment failed. Check the run logs and the variant's `results.jsonl`/session logs. These are usually infra/flake — re-run before treating as a real regression. If the **skilled** or **baseline** variant produced no records, the adapter writes no verdict for that skill (a warning is emitted).
+### 1. Errored or missing trials (`state == "INVALID_INCONCLUSIVE"`)
+The agent crashed, the model was unavailable, evidence was missing, or the comparison judge failed. Check `stateReason`, `errors[]`, `adapter-summary.json`, and the variant's `results.jsonl`/session logs. These are invalid measurements, not skill regressions. If a required variant produced no records, the adapter writes an explicit invalid result with `missing_baseline_records` or `missing_skilled_records`.
+
+For comparison-judge failures, inspect `errors[].code`. Known codes include
+`judge_session_idle_timeout`, `judge_organization_disabled`,
+`judge_rate_limited`, and `judge_service_error`. The adapter makes one targeted retry. It keeps every
+successful first-attempt judgment fixed and replaces only errored slots. A
+recovered transient appears in `recoveredErrors[]`; an unresolved failure stays
+in `errors[]` and makes the state invalid.
 
 ### 2. Timeouts (`scenario.timedOut == true`, `trajectory.endReason == "agent_timeout"`)
 The agent didn't finish within the eval's `config.timeout`. Either the task is too large for the budget or the skill sent the agent down a slow path. Fixes: raise `config.timeout` in `eval.yaml` if the task legitimately needs more time, or tighten the skill so it converges faster.
@@ -111,7 +134,7 @@ The agent didn't finish within the eval's `config.timeout`. Either the task is t
 The skill was available but the agent never invoked it, so "skilled" ≈ "baseline" and no improvement is possible. Fixes: sharpen the skill's `description`/trigger phrasing in `SKILL.md` so the model recognizes when to use it, and make sure the eval prompt actually describes a task the skill targets.
 
 ### 4. Underpowered eval (`underpowered == true`)
-Not a skill problem — an eval problem. The gate is an exact one-sided sign test over the head-to-head trials, and `trials = scenarios × defaults.runs`. That test cannot reach `p ≤ 0.05` on fewer than five discordant trials (`0.5⁴ = 0.0625`), and discordant trials can never exceed counted trials — so below `minCredibleTrials` (5) **no possible record passes**, however good the skill is.
+Not a skill problem — an eval problem. This is `INVALID_INCONCLUSIVE` with `stateReason.code == "underpowered"`. The gate is an exact one-sided sign test over the head-to-head trials, and `trials = scenarios × defaults.runs`. That test cannot reach `p ≤ 0.05` on fewer than five discordant trials (`0.5⁴ = 0.0625`), and discordant trials can never exceed counted trials — so below `minCredibleTrials` (5) **no possible record passes**, however good the skill is.
 
 Do not "fix" the skill in response to this. Fix the eval: add scenarios (strongly preferred — five repeats of one scenario satisfy the arithmetic but still measure the skill on a single task), or declare `defaults: { runs: N }` in its `eval.yaml` so `scenarios × runs >= 5`. If the spec still opens with the deprecated `config:` block, **merge** `runs` into it and rename it `defaults:` — vally's loader throws on a spec declaring both, and that failure surfaces as "Evaluation ran but produced no results", not as a spec error. `eng/eval-quality/check_eval_quality.py` fails any new eval below the floor, rejects the `config:`+`defaults:` combination, and tracks the grandfathered ones in `eng/eval-quality/underpowered-allowlist.txt`.
 
@@ -119,12 +142,21 @@ Clearing the floor is necessary, not sufficient. The sign test conditions on the
 
 ### 5. No credible net win (`passed == false` with `netWin <= 0` or `signTest.pValue > 0.05`)
 The judge didn't consistently prefer the skilled run over baseline.
-- **`netWin <= 0`** — at least as many losses as wins. Either the skill isn't helping for these scenarios, or the baseline model is already strong here. Strengthen the skill's guidance, or reconsider whether the scenario exercises the skill's value. If `regressed` is also `true`, the losses themselves are credible: the skill is actively hurting.
+- **`netWin <= 0`** — at least as many losses as wins. Either the skill isn't helping for these scenarios, or the baseline model is already strong here. If `preferenceRegressed` is `true`, the LLM judge credibly preferred baseline. This is report-only preference evidence, not an objective completion regression.
 - **`netWin > 0` but `signTest.pValue > 0.05`** — a real but inconsistent signal: the skill wins some scenarios and ties or loses others. Ties count against here, because they hold the discordant trial count down. Add more/broader scenarios so there is enough evidence, and make the skill help consistently rather than occasionally.
 - Do **not** read `meanScore` here. It is magnitude-weighted and reported for triage only; a verdict never turns on it (see `eng/eval-quality/README.md`, "Why the gate scores direction, not magnitude").
 - Inspect `scenarios[].trials[].evidence` for the judge's reasoning on losses/ties, and compare the skilled vs baseline `events.jsonl` to see what the skill changed (or failed to change).
 
-### 6. Quality looks fine but the skill still fails the gate
+### 6. Completion-transition telemetry
+
+`completionTransitions` counts aggregate `baselinePassed` and
+`treatmentPassed` transitions from Vally compare. It is not a hard gate:
+Vally's aggregate pass can include LLM grader output, so it is not an objective
+task-completion primitive. `VALID_REGRESSION` is reserved until Vally exposes
+objective per-grader completion evidence. Do not infer an objective regression
+from `completionTransitions.baselineOnly`.
+
+### 7. Quality looks fine but the skill still fails the gate
 The gate is a **preference** comparison, not an absolute score. A high `skilledIsolated.judgeResult.overallScore` that isn't clearly better than `baseline.judgeResult.overallScore` will not pass. Focus on the *delta* over baseline, not the absolute number.
 
 ## Re-running
