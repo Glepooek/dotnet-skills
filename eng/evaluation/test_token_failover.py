@@ -18,6 +18,7 @@ except ImportError:  # pragma: no cover
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "evaluation-run.yml"
 CALLER_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "evaluation.yml"
+TEST_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "evaluation-workflow-tests.yml"
 STEP_NAME = "Select available Copilot token from pool"
 GIT_BASH = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git" / "bin" / "bash.exe"
 BASH = str(GIT_BASH) if os.name == "nt" and GIT_BASH.exists() else "bash"
@@ -262,12 +263,48 @@ esac
             install_script,
         )
         self.assertIn(
+            '"$RUNNER_TEMP/trusted-validator-src/eng/evaluation-tools/package.json"',
+            install_script,
+        )
+        self.assertIn(
+            '"$RUNNER_TEMP/trusted-validator-src/eng/evaluation-tools/package-lock.json"',
+            install_script,
+        )
+        self.assertIn("npm ci", install_script)
+        self.assertNotIn("npm install", install_script)
+        self.assertNotIn("@microsoft/vally-cli@", install_script)
+        self.assertNotIn("@github/copilot@", install_script)
+        self.assertIn(
             '"$RUNNER_TEMP/evaluation-tools/node_modules/.bin" >> "$GITHUB_PATH"',
             install_script,
         )
         self.assertIn(
             "import.meta.resolve('@github/copilot-linux-x64/sdk')",
             install_script,
+        )
+
+    def test_evaluation_tool_manifest_has_secretless_smoke_test(self) -> None:
+        workflow = yaml.safe_load(TEST_WORKFLOW.read_text(encoding="utf-8"))
+        triggers = workflow.get("on", workflow.get(True))
+        tool_path = "eng/evaluation-tools/**"
+        for event in ("pull_request", "push"):
+            self.assertEqual(triggers[event]["paths"].count(tool_path), 1)
+
+        job = workflow["jobs"]["evaluation-tools"]
+        self.assertEqual(job["runs-on"], "ubuntu-latest")
+        steps = {step.get("name"): step for step in job["steps"]}
+        install_script = steps["Install evaluation tools"]["run"]
+        self.assertIn("--prefix eng/evaluation-tools", install_script)
+        self.assertIn("npm ci", install_script)
+        self.assertNotIn("npm install", install_script)
+        self.assertIn("--registry https://registry.npmjs.org/", install_script)
+
+        smoke_script = steps["Smoke test evaluation tools"]["run"]
+        self.assertIn("node_modules/.bin/vally --version", smoke_script)
+        self.assertIn("node_modules/.bin/copilot --version", smoke_script)
+        self.assertIn(
+            "import.meta.resolve('@github/copilot-linux-x64/sdk')",
+            smoke_script,
         )
 
     def test_fork_checkout_is_blocked_and_adapter_code_is_trusted(self) -> None:
