@@ -193,6 +193,10 @@ function withTempDir(action) {
   }
 }
 
+function processOutput(result) {
+  return `${result.stdout}\n${result.stderr}`;
+}
+
 test("retries a transient comparison error once", () => {
   withTempDir((root) => {
     const { result, compareCount, verdict } = runAdapter(root, "recover");
@@ -204,7 +208,7 @@ test("retries a transient comparison error once", () => {
     assert.equal(verdict.passed, true);
     assert.equal(verdict.state, VERDICT_STATES.VALID_PASS);
     assert.equal(verdict.recoveredErrors.length, 5);
-    assert.match(result.stderr, /without replacing successful judgments/);
+    assert.match(processOutput(result), /without replacing successful judgments/);
   });
 });
 
@@ -240,7 +244,7 @@ test("preserves adapter diagnostics when compare fails", () => {
     assert.equal(verdict.state, VERDICT_STATES.INVALID_INCONCLUSIVE);
     assert.equal(verdict.stateReason.code, "comparison_invocation_failed");
     assert.equal(verdict.errors[0].phase, "comparison_judge");
-    assert.match(result.stderr, /vally compare failed/);
+    assert.match(processOutput(result), /vally compare failed/);
   });
 });
 
@@ -309,7 +313,7 @@ test("keeps a persistent comparison error visible after one retry", () => {
     );
     assert.equal(verdict.comparisonAttempts.persistentErrors.length, 5);
     assert.match(verdict.reason, /inconclusive \(comparison errors\)/);
-    assert.match(result.stderr, /did not reduce errored trials/);
+    assert.match(processOutput(result), /did not reduce errored trials/);
   });
 });
 
