@@ -28,7 +28,7 @@ When an evaluation has failures, the PR comment includes a ready-to-use prompt �
 |--------|---------|
 | `Skill` | Skill under test |
 | `Result` | ✅ `VALID_PASS` / 🔻 objective `VALID_REGRESSION` / ❌ `VALID_NO_CHANGE` / 📉 report-only LLM preference loss / ⚠️ `INVALID_INCONCLUSIVE` |
-| `Net win` | `(wins − losses) / trials`. **The deciding effect size** |
+| `Net win` | `(wins − losses) / trials`. Must be at least +20% for a pass |
 | `p` | One-sided exact sign test over the discordant (non-tie) trials. A skill passes only at `p ≤ 0.05`, which needs at least 5 winning trials |
 | `Δ Pref` | The same comparison weighted by how decisive each win was (`much-better` ±100%, `slightly-better` ±40%). Triage only; deliberately not gated on |
 | `W/T/L` | Wins / ties / losses across trials |
@@ -60,8 +60,9 @@ A verdict carries **both** the head-to-head preference and absolute per-role dat
 | `skillName` / `skillPath` | The skill under test |
 | `state` | One of `VALID_PASS`, `VALID_REGRESSION`, `VALID_NO_CHANGE`, or `INVALID_INCONCLUSIVE` |
 | `stateReason` | Machine-readable `{ code, phase }`. Use this field for automation; do not parse `reason` |
-| `passed` | **The gate.** `true` only on a credible net win: more wins than losses at `signTest.pValue <= 0.05`, `conclusive`, and not `underpowered` |
+| `passed` | **The gate.** `true` only when `conclusive`, not `underpowered`, `signTest.pValue <= 0.05`, and `netWin >= 0.20` |
 | `netWin` | `(wins − losses) / trials` — the effect size the gate reads. Magnitude-free, so an identical W/T/L record always yields an identical verdict |
+| `practicalSignificance` | `{ netWin, minimum, passed }`. The absolute directional effect must reach 20%; this blocks sparse records such as `5W/95T/0L` |
 | `signTest` | `{ wins, ties, losses, discordant, pValue, alpha }` — exact one-sided binomial tail over the discordant (non-tie) trials. **This is what decides.** Ties can't support a win, so they hold `discordant` down |
 | `regressed` / `preferenceRegressed` | Compatibility and explicit fields for a credible LLM preference loss. Under schema version 2 this maps to `VALID_NO_CHANGE`, not `VALID_REGRESSION`, because ordinal LLM preference is not objective completion evidence. Renderers apply the same report-only meaning to legacy records that have `regressed: true` but no `state` |
 | `conclusive` | `false` when the comparison didn't complete: errored trials, unmatched trajectories, or a summary that disagrees with its own `stimuli[].trials` |
@@ -120,6 +121,11 @@ Work top-down; earlier categories often cause later ones.
 ### 1. Errored or missing trials (`state == "INVALID_INCONCLUSIVE"`)
 The agent crashed, the model was unavailable, evidence was missing, or the comparison judge failed. Check `stateReason`, `errors[]`, `adapter-summary.json`, and the variant's `results.jsonl`/session logs. These are invalid measurements, not skill regressions. If a required variant produced no records, the adapter writes an explicit invalid result with `missing_baseline_records` or `missing_skilled_records`.
 
+If Vally writes a JSON record that cannot satisfy the comparison schema, the
+adapter emits `comparison_report_invalid` for that eval and continues the batch.
+This preserves exact result accounting without treating malformed evidence as a
+quality result.
+
 For comparison-judge failures, inspect `errors[].code`. Known codes include
 `judge_session_idle_timeout`, `judge_organization_disabled`,
 `judge_rate_limited`, and `judge_service_error`. The adapter makes one targeted retry. It keeps every
@@ -140,10 +146,11 @@ Do not "fix" the skill in response to this. Fix the eval: add scenarios (strongl
 
 Clearing the floor is necessary, not sufficient. The sign test conditions on the **discordant** (non-tie) trials, so an eval at exactly 5 counted trials only passes on a flawless 5W/0T/0L sweep — one tie leaves 4 discordant and puts it back below the floor without setting `underpowered`. Check `signTest.discordant`, not `trialCount`, when a record with more wins than losses still fails.
 
-### 5. No credible net win (`passed == false` with `netWin <= 0` or `signTest.pValue > 0.05`)
+### 5. No credible or practical net win
 The judge didn't consistently prefer the skilled run over baseline.
 - **`netWin <= 0`** — at least as many losses as wins. Either the skill isn't helping for these scenarios, or the baseline model is already strong here. If `preferenceRegressed` is `true`, the LLM judge credibly preferred baseline. This is report-only preference evidence, not an objective completion regression.
 - **`netWin > 0` but `signTest.pValue > 0.05`** — a real but inconsistent signal: the skill wins some scenarios and ties or loses others. Ties count against here, because they hold the discordant trial count down. Add more/broader scenarios so there is enough evidence, and make the skill help consistently rather than occasionally.
+- **`signTest.pValue <= 0.05` but `practicalSignificance.passed == false`** — the direction is statistically credible but too sparse to matter across counted trials. For example, `5W/95T/0L` has `p=0.03125` but only a 5% net win. Add discriminating scenarios or improve the skill; do not add repeated ties.
 - Do **not** read `meanScore` here. It is magnitude-weighted and reported for triage only; a verdict never turns on it (see `eng/eval-quality/README.md`, "Why the gate scores direction, not magnitude").
 - Inspect `scenarios[].trials[].evidence` for the judge's reasoning on losses/ties, and compare the skilled vs baseline `events.jsonl` to see what the skill changed (or failed to change).
 
@@ -152,9 +159,32 @@ The judge didn't consistently prefer the skilled run over baseline.
 `completionTransitions` counts aggregate `baselinePassed` and
 `treatmentPassed` transitions from Vally compare. It is not a hard gate:
 Vally's aggregate pass can include LLM grader output, so it is not an objective
-task-completion primitive. `VALID_REGRESSION` is reserved until Vally exposes
-objective per-grader completion evidence. Do not infer an objective regression
-from `completionTransitions.baselineOnly`.
+task-completion primitive. Do not infer an objective regression from
+`completionTransitions.baselineOnly`.
+
+The required objective primitive is tri-state per
+`(eval, stimulus, trialIndex, arm)`: `true` only when all explicitly marked,
+allowlisted deterministic completion graders pass; `false` when one explicitly
+fails and none is missing or errored; otherwise `unknown`. It must use raw
+per-grader details matched by `(graderType, name)`, never aggregate pass,
+weights, thresholds, LLM graders, or human graders. One baseline-only
+transition is only a candidate. `VALID_REGRESSION` additionally requires
+conclusive paired confirmation at `p <= 0.05`, at least a 20% objective net
+loss, and correction across multiple tested completion scenarios.
+
+Vally 0.13 supplies `graderType` in raw grader details, but evals do not yet
+declare which deterministic graders are task-completion invariants and compare
+JSONL still exposes only aggregate booleans. Therefore the state remains
+reserved and the aggregate transition remains report-only.
+
+### Vally 0.13 comparison identity
+
+Vally 0.13 comparison trials retain the `(stimulusName, trialIndex)` identity
+used by retry merging. Repeated compare calls over the same persisted inputs
+produce the same indices. Do not treat the index as a durable ID across
+regenerated runs or future Vally versions. An all-errored comparison exits
+nonzero in 0.13 after writing its report; the adapter reads that report so it
+can retry and classify the failure.
 
 ### 7. Quality looks fine but the skill still fails the gate
 The gate is a **preference** comparison, not an absolute score. A high `skilledIsolated.judgeResult.overallScore` that isn't clearly better than `baseline.judgeResult.overallScore` will not pass. Focus on the *delta* over baseline, not the absolute number.

@@ -307,6 +307,21 @@ esac
             smoke_script,
         )
 
+    def test_adapter_fault_injection_runs_in_pr_ci(self) -> None:
+        workflow = yaml.safe_load(TEST_WORKFLOW.read_text(encoding="utf-8"))
+        triggers = workflow.get("on", workflow.get(True))
+        adapter_path = "eng/vally-adapter/**"
+        for event in ("pull_request", "push"):
+            self.assertEqual(triggers[event]["paths"].count(adapter_path), 1)
+
+        job = workflow["jobs"]["vally-adapter"]
+        self.assertEqual(job["runs-on"], "ubuntu-latest")
+        steps = {step.get("name"): step for step in job["steps"]}
+        self.assertIn(
+            "node --test eng/vally-adapter/*.test.mjs",
+            steps["Run adapter fault-injection and report tests"]["run"],
+        )
+
     def test_fork_checkout_is_blocked_and_adapter_code_is_trusted(self) -> None:
         workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
         steps = workflow["jobs"]["vally-evaluate"]["steps"]

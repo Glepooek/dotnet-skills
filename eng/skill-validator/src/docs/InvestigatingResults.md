@@ -7,8 +7,11 @@
 > `INVALID_INCONCLUSIVE`. Use `stateReason` and `errors[]` for machine-readable
 > causes. `preferenceRegressed` is report-only LLM preference evidence and is
 > not an objective completion regression. `adapter-summary.json` reconciles the
-> exact expected-eval manifest with observed and written results. These fields
-> do not exist in the legacy schema documented below.
+> exact expected-eval manifest with observed and written results.
+> `practicalSignificance` adds the 20% net-win floor. Objective completion is a
+> separately defined tri-state over explicitly selected deterministic graders;
+> aggregate Vally pass booleans remain report-only. These fields do not exist
+> in the legacy schema documented below.
 
 This guide is intended primarily for AI agents investigating skill evaluation failures, though humans will find it useful too. It documents the `results.json` schema, common failure patterns, and recommended fixes.
 

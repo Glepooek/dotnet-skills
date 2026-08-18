@@ -15,6 +15,7 @@ import {
   trialDirection,
   VERDICT_STATES,
   MIN_CREDIBLE_TRIALS,
+  MIN_PRACTICAL_NET_WIN,
   SIGN_TEST_ALPHA,
 } from "./adapt.mjs";
 
@@ -40,6 +41,12 @@ function createExperiment(root) {
   return runDir;
 }
 
+function createEmptyExperiment(root) {
+  const runDir = join(root, "experiment");
+  mkdirSync(runDir, { recursive: true });
+  return runDir;
+}
+
 function createFakeVally(root, mode, trialCount) {
   const scriptPath = join(root, "fake-vally.mjs");
   const statePath = join(root, "compare-count.txt");
@@ -58,41 +65,70 @@ if (mode === "empty") {
   writeFileSync(output, "");
   process.exit(0);
 }
-const errored = mode === "persistent" || (mode === "recover" && count === 1);
 const unmatched = mode === "unmatched";
 // One winning trial per run of the single stimulus, all scored "slightly
 // better". Errored trials are excluded from every statistic by vally, so the
-// errored modes report zero counted trials.
-const trials = Array.from({ length: trialCount }, (_, trialIndex) => ({
-  trialIndex,
-  winner: errored ? "tie" : "treatment",
-  magnitude: errored ? "equal" : "slightly-better",
-  score: errored ? 0 : 0.4,
-  evidence: errored ? "Comparison judge failed: timeout" : "Treatment was better",
-  baselinePassed: true,
-  treatmentPassed: true,
-  errored
-}));
+// all-errored modes report zero counted trials.
+const trials = Array.from({ length: trialCount }, (_, trialIndex) => {
+  const errored =
+    mode === "persistent" ||
+    mode === "organization-disabled" ||
+    mode === "all-errored-exit-persistent" ||
+    ((mode === "recover" || mode === "all-errored-exit-recover") && count === 1) ||
+    (mode === "partial-recover" && count === 1 && trialIndex === 0);
+  // On the partial retry, deliberately reverse the four already-successful
+  // slots. The adapter must freeze them and take only the recovered slot 0.
+  const retryDisagrees = mode === "partial-recover" && count === 2 && trialIndex > 0;
+  const evidence = errored
+    ? mode === "organization-disabled"
+      ? "Comparison judge failed: CAPIError 400 This organization has been disabled"
+      : "Comparison judge failed: Timeout after 120000ms waiting for session.idle"
+    : retryDisagrees
+      ? "Baseline was better on the retry"
+      : "Treatment was better";
+  return {
+    trialIndex,
+    winner: errored ? "tie" : retryDisagrees ? "baseline" : "treatment",
+    magnitude: errored ? "equal" : retryDisagrees ? "slightly-worse" : "slightly-better",
+    score: errored ? 0 : retryDisagrees ? -0.4 : 0.4,
+    evidence,
+    baselinePassed: true,
+    treatmentPassed: true,
+    errored
+  };
+});
+const counted = trials.filter((trial) => !trial.errored);
+const wins = counted.filter((trial) => trial.winner === "treatment").length;
+const losses = counted.filter((trial) => trial.winner === "baseline").length;
+const ties = counted.length - wins - losses;
 const report = {
-  type: "comparison-report",
+  type: "comparison",
   summary: {
-    trialCount: errored ? 0 : trialCount,
-    erroredCount: errored ? trialCount : 0,
-    meanScore: errored ? 0 : 0.4,
-    ciLow: errored ? 0 : 0.4,
-    ciHigh: errored ? 0 : 0.4,
-    wins: errored ? 0 : trialCount,
-    ties: 0,
-    losses: 0,
-    winRate: errored ? 0 : 1,
-    mcnemar: { baselineOnly: 0, treatmentOnly: 0, concordant: trialCount, pValue: 1, exact: true },
+    trialCount: counted.length,
+    erroredCount: trialCount - counted.length,
+    meanScore: counted.length ? counted.reduce((sum, trial) => sum + trial.score, 0) / counted.length : 0,
+    ciLow: 0,
+    ciHigh: 0,
+    wins,
+    ties,
+    losses,
+    winRate: counted.length ? wins / counted.length : 0,
+    mcnemar: { baselineOnly: 0, treatmentOnly: 0, concordant: counted.length, pValue: 1, exact: true },
     metricDeltas: []
   },
-  stimuli: [{ stimulusName: "Scenario", meanScore: errored ? 0 : 0.4, trials }],
+  stimuli: [{ stimulusName: "Scenario", meanScore: 0, trials }],
   unmatchedBaseline: unmatched ? ["Baseline only (trial 0)"] : [],
   unmatchedTreatment: unmatched ? ["Treatment only (trial 0)"] : []
 };
+if (mode === "malformed") delete report.summary;
 writeFileSync(output, JSON.stringify(report) + "\\n");
+if (
+  (mode === "all-errored-exit-recover" && count === 1) ||
+  mode === "all-errored-exit-persistent" ||
+  mode === "organization-disabled"
+) {
+  process.exit(1);
+}
 `,
   );
   return {
@@ -103,8 +139,14 @@ writeFileSync(output, JSON.stringify(report) + "\\n");
 
 // Default to a trial count at the credibility floor so a test that isn't about
 // statistical power gets a verdict that can actually pass.
-function runAdapter(root, mode, trialCount = 5, expectedEvalFiles = [evalFile]) {
-  const runDir = createExperiment(root);
+function runAdapter(
+  root,
+  mode,
+  trialCount = 5,
+  expectedEvalFiles = [evalFile],
+  experimentFactory = createExperiment,
+) {
+  const runDir = experimentFactory(root);
   const outputRoot = join(root, "output");
   const expectedEvalsPath = join(root, "expected-evals.txt");
   writeFileSync(expectedEvalsPath, `${expectedEvalFiles.join("\n")}\n`);
@@ -166,6 +208,31 @@ test("retries a transient comparison error once", () => {
   });
 });
 
+test("Vally 0.13 all-errored exit still reaches slot-preserving retry", () => {
+  withTempDir((root) => {
+    const { result, compareCount, verdict } = runAdapter(root, "all-errored-exit-recover");
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(compareCount, 2);
+    assert.equal(verdict.state, VERDICT_STATES.VALID_PASS);
+    assert.equal(verdict.comparisonAttempts.recoveredSlots, 5);
+    assert.equal(verdict.errors.length, 0);
+  });
+});
+
+test("recovers one session.idle slot and freezes four successful judgments", () => {
+  withTempDir((root) => {
+    const { result, compareCount, verdict } = runAdapter(root, "partial-recover");
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(compareCount, 2);
+    assert.equal(verdict.state, VERDICT_STATES.VALID_PASS);
+    assert.equal(verdict.wins, 5);
+    assert.equal(verdict.losses, 0);
+    assert.equal(verdict.comparisonAttempts.recoveredSlots, 1);
+    assert.equal(verdict.comparisonAttempts.frozenSuccesses, 4);
+    assert.equal(verdict.recoveredErrors[0].code, "judge_session_idle_timeout");
+  });
+});
+
 test("preserves adapter diagnostics when compare fails", () => {
   withTempDir((root) => {
     const { result, verdict } = runAdapter(root, "fails");
@@ -177,6 +244,29 @@ test("preserves adapter diagnostics when compare fails", () => {
   });
 });
 
+test("keeps a Vally 0.13 all-errored report invalid when retry also errors", () => {
+  withTempDir((root) => {
+    const { result, compareCount, verdict } = runAdapter(root, "all-errored-exit-persistent");
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(compareCount, 2);
+    assert.equal(verdict.state, VERDICT_STATES.INVALID_INCONCLUSIVE);
+    assert.equal(verdict.erroredCount, 5);
+    assert.equal(verdict.errors.length, 5);
+  });
+});
+
+test("classifies a persistent organization-disabled judge failure", () => {
+  withTempDir((root) => {
+    const { result, compareCount, verdict } = runAdapter(root, "organization-disabled");
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(compareCount, 2);
+    assert.equal(verdict.state, VERDICT_STATES.INVALID_INCONCLUSIVE);
+    assert.equal(verdict.errors.length, 5);
+    assert.ok(verdict.errors.every((error) => error.code === "judge_organization_disabled"));
+    assert.ok(verdict.errors.every((error) => error.attempts === 2));
+  });
+});
+
 test("classifies an empty compare output as a missing record", () => {
   withTempDir((root) => {
     const { result, verdict } = runAdapter(root, "empty");
@@ -184,6 +274,20 @@ test("classifies an empty compare output as a missing record", () => {
     assert.equal(verdict.state, VERDICT_STATES.INVALID_INCONCLUSIVE);
     assert.equal(verdict.stateReason.code, "comparison_record_missing");
     assert.doesNotMatch(verdict.errors[0].message, /Cannot set properties/);
+  });
+});
+
+test("a malformed comparison report becomes one explicit invalid result", () => {
+  withTempDir((root) => {
+    const { result, verdict, outputRoot } = runAdapter(root, "malformed");
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(verdict.state, VERDICT_STATES.INVALID_INCONCLUSIVE);
+    assert.equal(verdict.stateReason.code, "comparison_report_invalid");
+    assert.equal(verdict.errors[0].phase, "adapter");
+
+    const summary = JSON.parse(readFileSync(join(outputRoot, "adapter-summary.json"), "utf8"));
+    assert.equal(summary.writtenResultCount, 1);
+    assert.deepEqual(summary.invalidEvals, [evalFile]);
   });
 });
 
@@ -277,6 +381,48 @@ test("writes an explicit invalid verdict for every expected eval", () => {
     assert.equal(summary.writtenResultCount, 2);
     assert.deepEqual(summary.missingEvals, [missingEval]);
     assert.deepEqual(summary.invalidEvals, [missingEval]);
+  });
+});
+
+test("records an observed eval that is absent from the expected manifest", () => {
+  withTempDir((root) => {
+    const expectedEval = "tests/dotnet-test/missing-skill/eval.yaml";
+    const { result, outputRoot } = runAdapter(root, "clean", 5, [expectedEval]);
+    assert.equal(result.status, 0, result.stderr);
+
+    const unexpectedResult = JSON.parse(
+      readFileSync(
+        join(outputRoot, "dotnet-diag", "analyzing-dotnet-performance", "results.json"),
+        "utf8",
+      ),
+    );
+    assert.equal(unexpectedResult.expectedEval, false);
+
+    const summary = JSON.parse(readFileSync(join(outputRoot, "adapter-summary.json"), "utf8"));
+    assert.deepEqual(summary.unexpectedEvals, [evalFile]);
+    assert.equal(summary.unexpectedEvalCount, 1);
+  });
+});
+
+test("writes an explicit invalid result when the entire eval run is empty", () => {
+  withTempDir((root) => {
+    const { result, compareCount, verdict, outputRoot } = runAdapter(
+      root,
+      "clean",
+      5,
+      [evalFile],
+      createEmptyExperiment,
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(compareCount, undefined);
+    assert.equal(verdict.state, VERDICT_STATES.INVALID_INCONCLUSIVE);
+    assert.equal(verdict.stateReason.code, "missing_baseline_and_skilled_records");
+
+    const summary = JSON.parse(readFileSync(join(outputRoot, "adapter-summary.json"), "utf8"));
+    assert.equal(summary.expectedEvalCount, 1);
+    assert.equal(summary.writtenResultCount, 1);
+    assert.deepEqual(summary.missingEvals, [evalFile]);
+    assert.deepEqual(summary.invalidEvals, [evalFile]);
   });
 });
 
@@ -631,6 +777,39 @@ test("the credibility floor is the smallest count that can reach the alpha", () 
   // never exceed counted trials.
   assert.ok(signTestPValue(MIN_CREDIBLE_TRIALS, 0) <= SIGN_TEST_ALPHA);
   assert.ok(signTestPValue(MIN_CREDIBLE_TRIALS - 1, 0) > SIGN_TEST_ALPHA);
+});
+
+test("the practical net-win floor rejects sparse wins among many ties", () => {
+  const sparse = gate([...Array(5).fill(0.4), ...Array(95).fill(0)]);
+  assert.ok(sparse.signTest.pValue <= SIGN_TEST_ALPHA);
+  assert.equal(sparse.netWin, 0.05);
+  assert.equal(sparse.practicalSignificance.passed, false);
+  assert.equal(sparse.passed, false);
+  assert.equal(sparse.state, VERDICT_STATES.VALID_NO_CHANGE);
+  assert.equal(sparse.stateReason.code, "practical_effect_below_floor");
+
+  const boundary = gate([...Array(5).fill(0.4), ...Array(20).fill(0)]);
+  assert.equal(boundary.netWin, MIN_PRACTICAL_NET_WIN);
+  assert.equal(boundary.practicalSignificance.passed, true);
+  assert.equal(boundary.passed, true);
+});
+
+test("the practical floor preserves every possible pass through 24 trials", () => {
+  for (let trialCount = MIN_CREDIBLE_TRIALS; trialCount <= 24; trialCount++) {
+    for (let wins = 0; wins <= trialCount; wins++) {
+      for (let losses = 0; losses <= trialCount - wins; losses++) {
+        const ties = trialCount - wins - losses;
+        const statisticallyPassed =
+          wins > losses && signTestPValue(wins, losses) <= SIGN_TEST_ALPHA;
+        if (!statisticallyPassed) continue;
+        const netWin = (wins - losses) / trialCount;
+        assert.ok(
+          netWin >= MIN_PRACTICAL_NET_WIN,
+          `${wins}W/${ties}T/${losses}L at n=${trialCount} would change`,
+        );
+      }
+    }
+  }
 });
 
 // --- CLI tokenizer ----------------------------------------------------------

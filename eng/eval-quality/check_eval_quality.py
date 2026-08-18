@@ -370,14 +370,14 @@ def load_allowlist() -> list[str]:
 
 
 def report_knife_edge(specs: list[str]) -> None:
-    """Flag evals whose only passing record is a flawless sweep.
+    """Flag evals whose passing records cannot tolerate a loss.
 
     MIN_TRIALS is where a verdict becomes *possible*, not where it becomes
     *likely*. The sign test conditions on the discordant (non-tie) trials, so at
-    5, 6 or 7 counted trials the only record reaching alpha is every trial a win
-    with no ties and no losses. One tie is enough to make the eval unwinnable —
-    at 5 counted trials a single tie leaves 4 discordant, which is back below the
-    floor. Tolerating even one loss needs 8 discordant trials.
+    5, 6 or 7 counted trials a passing record needs at least five wins and no
+    losses. At 5 counted trials one tie is fatal; at 6 one tie is survivable, and
+    at 7 two ties are survivable. Tolerating even one loss needs 8 discordant
+    trials.
 
     This is not hypothetical. Run 30611635547 put five dotnet-test evals at
     exactly 5 trials; they returned 16W/8T/1L overall — every skill winning, none
@@ -404,9 +404,10 @@ def report_knife_edge(specs: list[str]) -> None:
     if not band:
         return
     warnings.append(
-        f"{len(band)} eval(s) sit at {MIN_TRIALS}-7 trials, where the only passing record is "
-        f"every trial a win with no ties and no losses. One tie makes them unwinnable. Raise "
-        f"them if their scenarios are not near-certain discriminators:")
+        f"{len(band)} eval(s) sit at {MIN_TRIALS}-7 trials, where any loss is fatal and ties "
+        f"can leave fewer than {MIN_TRIALS} discordant trials. At exactly {MIN_TRIALS} counted "
+        f"trials, one tie makes a pass impossible. Raise them if their scenarios are not "
+        f"near-certain discriminators:")
     warnings.extend(
         f"    {t} trial(s) = {sc} scenario(s) x runs={r}  {spec}"
         for t, sc, r, spec in sorted(band))

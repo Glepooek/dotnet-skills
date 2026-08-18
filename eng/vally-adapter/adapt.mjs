@@ -144,6 +144,12 @@ Options:
 // discordant count down and a tie-heavy record simply fails to reach 5%.
 const SIGN_TEST_ALPHA = 0.05;
 
+// Statistical significance alone can approve a negligible effect when ties
+// dominate: 5W/95T/0L has p=0.031 but improves only 5% of counted trials. Keep
+// the effect-size floor magnitude-free so stronger judge adjectives cannot
+// reintroduce the variance reversal fixed in dotnet/skills#952.
+const MIN_PRACTICAL_NET_WIN = 0.2;
+
 // Minimum counted trials behind a verdict. This is not a chosen constant: the
 // sign test cannot reach 5% on fewer than five discordant trials
 // (0.5^4 = 0.0625 > 0.05 >= 0.031 = 0.5^5), and discordant trials can never
@@ -700,9 +706,21 @@ function runCompare(baselineSlice, skilledSlice, outFile) {
     "--output",
     outFile,
   ];
-  execFileSync(bin, args, { stdio: ["ignore", "ignore", "inherit"] });
-  const records = loadJsonlFile(outFile);
-  return records[0] ?? null;
+  let invocationError;
+  try {
+    execFileSync(bin, args, { stdio: ["ignore", "ignore", "inherit"] });
+  } catch (error) {
+    invocationError = error;
+  }
+
+  // Vally 0.13 exits nonzero when every comparison trial errors, but it writes
+  // the structured comparison report first. That report is exactly what the
+  // adapter needs to classify the failures and retry their stable trial slots.
+  // A nonzero invocation with no report remains a hard invocation failure.
+  const records = existsSync(outFile) ? loadJsonlFile(outFile) : [];
+  if (records[0]) return records[0];
+  if (invocationError) throw invocationError;
+  return null;
 }
 
 function runCompareWithRetry(baselineSlice, skilledSlice, outFile) {
@@ -836,8 +854,11 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
     direction === "worse" ? signTestPValue(losses, wins) : signTestPValue(wins, losses);
   const netWin = directions.length ? (wins - losses) / directions.length : 0;
   const credible = pValue <= SIGN_TEST_ALPHA;
-  const passed = conclusive && !underpowered && direction === "better" && credible;
-  const regressed = conclusive && !underpowered && direction === "worse" && credible;
+  const practicallyMeaningful = Math.abs(netWin) >= MIN_PRACTICAL_NET_WIN;
+  const passed =
+    conclusive && !underpowered && direction === "better" && credible && practicallyMeaningful;
+  const regressed =
+    conclusive && !underpowered && direction === "worse" && credible && practicallyMeaningful;
   const nonActivation = nonActivationStims ?? new Set();
 
   // Compare's per-stimulus preference (meanScore + trials), keyed by name so we
@@ -988,6 +1009,10 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
             ? `underpowered (${directions.length} counted trial(s); a credible verdict needs at ` +
               `least ${MIN_CREDIBLE_TRIALS}${sweep ? ", and this eval won every one of them" : ""}) — ` +
               `raise the eval's trial count with more scenarios or defaults.runs`
+            : credible && direction !== "none" && !practicallyMeaningful
+            ? `statistically credible ${direction === "better" ? "improvement" : "preference loss"}, ` +
+              `but |net win| ${pct(Math.abs(netWin))} is below the practical floor ` +
+              `${pct(MIN_PRACTICAL_NET_WIN)}`
             : passed
               ? "credibly better"
               : regressed
@@ -1051,6 +1076,9 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
   } else if (underpowered) {
     state = VERDICT_STATES.INVALID_INCONCLUSIVE;
     stateReason = { code: "underpowered", phase: "eval_design" };
+  } else if (credible && direction !== "none" && !practicallyMeaningful) {
+    state = VERDICT_STATES.VALID_NO_CHANGE;
+    stateReason = { code: "practical_effect_below_floor", phase: "decision" };
   } else if (passed) {
     state = VERDICT_STATES.VALID_PASS;
     stateReason = { code: "credible_preference_improvement", phase: "decision" };
@@ -1073,6 +1101,11 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
     conclusive,
     underpowered,
     minCredibleTrials: MIN_CREDIBLE_TRIALS,
+    practicalSignificance: {
+      netWin: Math.abs(netWin),
+      minimum: MIN_PRACTICAL_NET_WIN,
+      passed: practicallyMeaningful,
+    },
     passed,
     regressed,
     preferenceRegressed: regressed,
@@ -1407,12 +1440,35 @@ function main() {
         warn(`${plugin}/${skill}: plugin variant produced no records — Plugin columns omitted for this skill`);
       }
 
-      const verdict = comparisonToVerdict(
-        report,
-        identity,
-        roles,
-        readNonActivationStimuli(evalFile, opts["repo-root"]),
-      );
+      let verdict;
+      try {
+        verdict = comparisonToVerdict(
+          report,
+          identity,
+          roles,
+          readNonActivationStimuli(evalFile, opts["repo-root"]),
+        );
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        const message = `${plugin}/${skill}: vally comparison report is invalid (${detail})`;
+        warn(message);
+        verdict = invalidVerdict(
+          identity,
+          { code: "comparison_report_invalid", phase: "adapter", kind: "permanent" },
+          message,
+          {
+            baselineRecords: baseline.length,
+            skilledRecords: skilled.length,
+            pluginRecords: pluginRecs.length,
+          },
+        );
+        const outputPath = writeVerdictResults(outputRoot, evalFile, identity, verdict, expectedEval);
+        console.log(`\n${verdictSummaryLine(verdict)}\n  → ${outputPath}`);
+        invalidEvals.push(evalFile);
+        written++;
+        incomplete++;
+        continue;
+      }
       if (!expectedEval) {
         verdict.state = VERDICT_STATES.INVALID_INCONCLUSIVE;
         verdict.stateReason = { code: "unexpected_eval", phase: "adapter" };
@@ -1498,5 +1554,6 @@ export {
   loadExpectedEvalFiles,
   VERDICT_STATES,
   MIN_CREDIBLE_TRIALS,
+  MIN_PRACTICAL_NET_WIN,
   SIGN_TEST_ALPHA,
 };
