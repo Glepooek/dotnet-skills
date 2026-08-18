@@ -67,13 +67,20 @@ if env | grep -Eq '^COPILOT_PAT_[0-9]='; then
   exit 11
 fi
 echo "$COPILOT_GITHUB_TOKEN" >> "$ATTEMPTS"
+model=""
+has_effort=false
 while [ "$#" -gt 0 ]; do
-  if [ "$1" = "--model" ]; then
-    echo "$2" >> "$MODELS"
-    break
-  fi
-  shift
+  case "$1" in
+    --model) model="$2"; shift 2 ;;
+    --effort=*) has_effort=true; shift ;;
+    *) shift ;;
+  esac
 done
+echo "$model" >> "$MODELS"
+if [ "$model" = "no-effort-model" ] && [ "$has_effort" = true ]; then
+  echo 'Error: Model "no-effort-model" does not support reasoning effort configuration (requested: "low").' >&2
+  exit 1
+fi
 case "$COPILOT_GITHUB_TOKEN" in
   rate-limited) echo "403 API rate limit exceeded" >&2; exit 1 ;;
   weekly-rate-limited) echo '{"type":"session.error","data":{"errorType":"rate_limit","errorCode":"user_weekly_rate_limited","message":"You have reached your weekly rate limit"}}' >&2; exit 1 ;;
@@ -82,6 +89,7 @@ case "$COPILOT_GITHUB_TOKEN" in
   weekly-message) echo "You have reached your weekly rate limit" >&2; exit 1 ;;
   timed-out) exit 124 ;;
   unauthorized) echo "401 Unauthorized" >&2; exit 7 ;;
+  unauthorized-after-effort) echo "401 Unauthorized after effort retry" >&2; exit 7 ;;
   healthy) exit 0 ;;
   *) echo "unexpected test token" >&2; exit 9 ;;
 esac
@@ -185,6 +193,39 @@ esac
         self.assertEqual(result.attempts, ["healthy", "healthy"])
         self.assertEqual(result.models, ["agent-model", "judge-model"])
         self.assertEqual(result.selected_token, "healthy")
+
+    def test_model_without_effort_support_is_retried_without_effort(self) -> None:
+        result = self.run_selector(
+            {0: "healthy"},
+            model="no-effort-model",
+            judge_model="judge-model",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.attempts, ["healthy", "healthy", "healthy"])
+        self.assertEqual(
+            result.models,
+            ["no-effort-model", "no-effort-model", "judge-model"],
+        )
+        self.assertEqual(result.selected_token, "healthy")
+        self.assertIn("retrying its availability probe without --effort", result.stdout)
+
+    def test_model_without_effort_support_fails_closed_after_one_retry(self) -> None:
+        result = self.run_selector(
+            {0: "unauthorized-after-effort", 1: "healthy"},
+            model="no-effort-model",
+            judge_model="judge-model",
+        )
+
+        self.assertEqual(result.returncode, 7)
+        self.assertEqual(
+            result.attempts,
+            ["unauthorized-after-effort", "unauthorized-after-effort"],
+        )
+        self.assertEqual(result.models, ["no-effort-model", "no-effort-model"])
+        self.assertIsNone(result.selected_token)
+        self.assertIn("non-rate-limit error", result.stdout)
+        self.assertIn("401 Unauthorized after effort retry", result.stdout)
 
     def test_non_rate_limit_failure_does_not_try_another_token(self) -> None:
         result = self.run_selector({0: "unauthorized", 1: "healthy"})

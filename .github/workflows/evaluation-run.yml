@@ -529,22 +529,34 @@ jobs:
             rm -rf "$PROBE_HOME"
             PROBE_HOME=$(mktemp -d)
             for probe_model in "${PROBE_MODELS[@]}"; do
-              set +e
-              (
-                cd "$RUNNER_TEMP"
-                COPILOT_HOME="$PROBE_HOME" COPILOT_GITHUB_TOKEN="$candidate_token" timeout 60s copilot \
-                  --prompt "Reply with exactly OK." \
-                  --available-tools="" \
-                  --no-bash-env \
-                  --no-custom-instructions \
-                  --no-experimental \
-                  --model "$probe_model" \
-                  --output-format=json \
-                  --silent \
-                  --effort=low >"$PROBE_LOG" 2>&1
-              )
-              probe_status=$?
-              set -e
+              effort_args=(--effort=low)
+              while true; do
+                set +e
+                (
+                  cd "$RUNNER_TEMP"
+                  COPILOT_HOME="$PROBE_HOME" COPILOT_GITHUB_TOKEN="$candidate_token" timeout 60s copilot \
+                    --prompt "Reply with exactly OK." \
+                    --available-tools="" \
+                    --no-bash-env \
+                    --no-custom-instructions \
+                    --no-experimental \
+                    --model "$probe_model" \
+                    --output-format=json \
+                    --silent \
+                    "${effort_args[@]}" >"$PROBE_LOG" 2>&1
+                )
+                probe_status=$?
+                set -e
+
+                if [ "$probe_status" -ne 0 ] \
+                  && [ ${#effort_args[@]} -gt 0 ] \
+                  && grep -Fq "does not support reasoning effort configuration" "$PROBE_LOG"; then
+                  echo "::notice::$probe_model does not support reasoning effort; retrying its availability probe without --effort"
+                  effort_args=()
+                  continue
+                fi
+                break
+              done
 
               if [ "$probe_status" -eq 0 ]; then
                 continue
