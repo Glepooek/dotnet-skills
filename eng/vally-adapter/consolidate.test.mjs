@@ -180,6 +180,23 @@ test("preserves execution model identity and aggregates measurement health", () 
   assert.match(markdown, /0 missing, 0 unexpected, 0 invalid/);
 });
 
+test("escapes table identity cells exactly once", () => {
+  const markdown = render([
+    {
+      skillName: "skill|name\nnext",
+      model: "model|name\nvariant",
+      state: "VALID_PASS",
+      passed: true,
+      conclusive: true,
+      scenarios: [],
+    },
+  ]);
+
+  assert.ok(markdown.includes("| skill\\|name next | model\\|name variant |"));
+  assert.equal(markdown.includes("skill\\\\|name"), false);
+  assert.equal(markdown.includes("model\\\\|name"), false);
+});
+
 test("keeps Overfit visible and gives actionable evidence for a non-pass", () => {
   const markdown = render([
     {
