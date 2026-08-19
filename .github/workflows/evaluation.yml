@@ -1290,22 +1290,18 @@ jobs:
           # If results exist, consolidate them into a summary comment
           JSON_FILES=$(find all-results/ -name results.json 2>/dev/null || true)
           if [ -n "$JSON_FILES" ]; then
-            # Full table (all columns incl. Quality (Plugin)) for the step summary,
-            # simplified table (Quality (Plugin) dropped) for the PR comment.
-            node eng/vally-adapter/consolidate.mjs --format full --root all-results/ --output summary-body.md
-            node eng/vally-adapter/consolidate.mjs --format simple --root all-results/ --output simplified-body.md
+            # Full metrics for the step summary and a decision-first repair view
+            # for the PR comment. Both bind the report to the evaluated commit.
+            node eng/vally-adapter/consolidate.mjs --format full --root all-results/ --output summary-body.md --commit "${{ needs.gate.outputs.head_sha }}"
+            node eng/vally-adapter/consolidate.mjs --format simple --root all-results/ --output simplified-body.md --commit "${{ needs.gate.outputs.head_sha }}"
 
             INVESTIGATE_PROMPT=""
-            # If any skill genuinely lost to its baseline, build a copy-paste
-            # prompt for AI-assisted investigation. Underpowered and inconclusive
-            # verdicts also carry `passed: false`, but neither is evidence that
-            # the skill regressed — attaching the prompt to those would fire on
-            # nearly every run and contradict the ⚠️ semantics of the comment
-            # body. The `!= false` / `!= true` form keeps results.json files that
-            # predate those fields classifying exactly as they did before.
-            if jq -se '[.[].verdicts[] | select(.passed == false and .conclusive != false and .underpowered != true)] | length > 0' $JSON_FILES > /dev/null 2>&1; then
+            # Any non-pass or comparison warning needs repair guidance, but the
+            # prompt must preserve the distinction between invalid evidence,
+            # unproven improvement, and report-only preference loss.
+            if jq -se '[.[].verdicts[] | select(.state != "VALID_PASS" or ((.errors // []) | length > 0) or ((.recoveredErrors // []) | length > 0))] | length > 0' $JSON_FILES > /dev/null 2>&1; then
               RUN_ID="${{ github.run_id }}"
-              INVESTIGATE_PROMPT=$(printf '\n> **To investigate failures**, paste this to your AI coding agent:\n>\n> _For PR %s in %s, download eval artifacts with `gh run download %s --repo %s --pattern "vally-results-*" --dir ./eval-results`, then fetch https://raw.githubusercontent.com/%s/%s/eng/vally-adapter/InvestigatingResults.md and follow it to analyze the results.json files. Diagnose each failure, suggest fixes to the eval.yaml and skill content, and tell me what to fix first._' \
+              INVESTIGATE_PROMPT=$(printf '\n> **To investigate non-passing or warning results**, paste this to your AI coding agent:\n>\n> _For PR %s in %s, download eval artifacts with `gh run download %s --repo %s --pattern "vally-results-*" --dir ./eval-results`, then fetch https://raw.githubusercontent.com/%s/%s/eng/vally-adapter/InvestigatingResults.md and follow it. Classify each result as measurement-invalid, underpowered, not-proven, preference-loss, or passing-with-warning. Use stateReason, result accounting, weak scenarios, and judge evidence to give the cause and exact next fix._' \
                 "${PR_NUMBER}" "${{ github.repository }}" "${RUN_ID}" "${{ github.repository }}" "${{ github.repository }}" "${{ needs.gate.outputs.head_sha }}")
             fi
 
@@ -1313,7 +1309,7 @@ jobs:
             {
               cat simplified-body.md
               echo ""
-              echo "[🔍 Full Results - additional metrics and failure investigation steps]($RUN_URL)"
+              echo "[🔍 Full Results - all metrics and investigation details]($RUN_URL)"
               if [ -n "$INVESTIGATE_PROMPT" ]; then
                 echo "$INVESTIGATE_PROMPT"
               fi
@@ -1354,12 +1350,12 @@ jobs:
               BODY="❌ Evaluation did not complete (an upstream job failed or was skipped, so evaluation never ran). [View workflow run](${RUN_URL})"
             elif [[ "${{ needs.evaluate.result }}" != "success" ]]; then
               # The evaluate job failed or was cancelled — it did not complete successfully.
-              BODY=$(printf '❌ Evaluation did not complete successfully (the evaluate job reported `%s`). Check the [workflow run](%s) logs, then re-post `/evaluate` to try again.' "${{ needs.evaluate.result }}" "${RUN_URL}")
+              BODY=$(printf '❌ Evaluation did not complete successfully (the evaluate job reported `%s`). Check the [workflow run](%s) logs, then comment `/evaluate %s` to retry this exact commit.' "${{ needs.evaluate.result }}" "${RUN_URL}" "${{ needs.gate.outputs.head_sha }}")
             else
               # The evaluate job completed but produced zero verdicts — most often a
               # transient LLM-session auth failure ("Session was not created with
               # authentication info or custom provider") rather than a skill regression.
-              BODY=$(printf '❌ Evaluation ran but produced no results.\n\nThe evaluate job completed but no `results.json` verdicts were generated. This is usually a **transient infrastructure failure** — commonly an LLM-session auth error (`Session was not created with authentication info or custom provider`) — not a problem with your skill. Check the [workflow run](%s) logs, then re-post `/evaluate` to try again.' "${RUN_URL}")
+              BODY=$(printf '❌ Evaluation ran but produced no results.\n\nThe evaluate job completed but no `results.json` verdicts were generated. This is usually a **transient infrastructure failure** — commonly an LLM-session auth error (`Session was not created with authentication info or custom provider`) — not a problem with your skill. Check the [workflow run](%s) logs, then comment `/evaluate %s` to retry this exact commit.' "${RUN_URL}" "${{ needs.gate.outputs.head_sha }}")
             fi
 
             gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" -X POST -f body="$BODY"

@@ -111,12 +111,11 @@ jobs:
           }
           "entries=$json" >> $env:GITHUB_OUTPUT
 
-  # Build and save the executable validator cache before any PR content is
-  # checked out. The evaluation matrix restores this cache but never saves it.
+  # Build or restore the executable validator before any PR content is checked
+  # out, then publish it as a same-run artifact for every matrix job. The cache
+  # is only an optimization; artifact handoff is the correctness boundary.
   prepare-validator:
     runs-on: ubuntu-latest
-    outputs:
-      cache-key: ${{ steps.cache-key.outputs.key }}
     steps:
       - name: Checkout trusted validator source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -157,11 +156,21 @@ jobs:
         run: tar -czf skill-validator-dist.tar.gz -C artifacts/publish/SkillValidator/release .
 
       - name: Save skill-validator archive
-        if: steps.cache-validator.outputs.cache-hit != 'true'
+        # issue_comment tokens cannot save caches. The same-run artifact below
+        # carries the archive regardless of whether this optimization succeeds.
+        if: steps.cache-validator.outputs.cache-hit != 'true' && github.event_name != 'issue_comment'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4
         with:
           path: skill-validator-dist.tar.gz
           key: ${{ steps.cache-key.outputs.key }}
+
+      - name: Upload trusted skill-validator archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: trusted-skill-validator-${{ github.run_id }}
+          path: skill-validator-dist.tar.gz
+          if-no-files-found: error
+          retention-days: 1
 
   # --------------------------------------------------------------------------
   # Run vally evaluation
@@ -416,44 +425,23 @@ jobs:
           )
           echo "$RUNNER_TEMP/evaluation-tools/node_modules/.bin" >> "$GITHUB_PATH"
 
-      # Build (or restore from cache) the skill-validator binary. Vally has no
-      # overfitting judge, so we retain skill-validator's standalone
-      # `overfitting` command (same rationale as retaining its `check` linter)
-      # and run it alongside the Vally comparison. The trusted-only cache is
-      # populated by prepare-validator before this job checks out PR content.
-      - name: Remove untrusted validator archive
+      # Vally has no overfitting judge, so retain skill-validator's standalone
+      # `overfitting` command. Its archive comes from prepare-validator in this
+      # run; matrix jobs never build it from the evaluated checkout.
+      - name: Download trusted skill-validator archive
         if: steps.find-evals.outputs.has_evals == 'true'
-        run: rm -f skill-validator-dist.tar.gz
-
-      - name: Restore skill-validator archive
-        id: cache-validator
-        if: steps.find-evals.outputs.has_evals == 'true'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4.3.0
         with:
-          # Keep this path and key identical to the trusted producer above.
-          path: skill-validator-dist.tar.gz
-          key: ${{ needs.prepare-validator.outputs.cache-key }}
-
-      - name: Setup .NET SDK
-        if: steps.find-evals.outputs.has_evals == 'true' && steps.cache-validator.outputs.cache-hit != 'true'
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5
-        with:
-          global-json-file: _trusted-validator-src/global.json
-
-      - name: Build trusted skill-validator
-        if: steps.find-evals.outputs.has_evals == 'true' && steps.cache-validator.outputs.cache-hit != 'true'
-        run: |
-          rm -rf "$RUNNER_TEMP/trusted-validator"
-          cd "$RUNNER_TEMP/trusted-validator-src"
-          dotnet publish \
-            "eng/skill-validator/src/SkillValidator.csproj" \
-            --output "$RUNNER_TEMP/trusted-validator"
+          name: trusted-skill-validator-${{ github.run_id }}
+          path: ${{ runner.temp }}/trusted-validator-archive
 
       - name: Extract skill-validator
-        if: steps.find-evals.outputs.has_evals == 'true' && steps.cache-validator.outputs.cache-hit == 'true'
+        if: steps.find-evals.outputs.has_evals == 'true'
         run: |
+          rm -rf "$RUNNER_TEMP/trusted-validator"
           mkdir -p "$RUNNER_TEMP/trusted-validator"
-          tar -xzf skill-validator-dist.tar.gz -C "$RUNNER_TEMP/trusted-validator"
+          tar -xzf "$RUNNER_TEMP/trusted-validator-archive/skill-validator-dist.tar.gz" \
+            -C "$RUNNER_TEMP/trusted-validator"
 
       - name: Select available Copilot token from pool
         id: select-token
@@ -922,7 +910,7 @@ jobs:
             elif [ "$PREFERENCE_REGRESSED" = "true" ]; then
               ICON="📉"
             else
-              ICON="❌"
+              ICON="➖"
             fi
 
             echo "### $ICON $EVAL_NAME" >> $GITHUB_STEP_SUMMARY

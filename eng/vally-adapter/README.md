@@ -73,6 +73,22 @@ Vally 0.13 exits nonzero when every judge slot errors while still writing the
 comparison report. The adapter reads that report, retries the identified slots,
 and treats a nonzero invocation with no report as a hard failure.
 
+## Reporting contract
+
+`consolidate.mjs --format simple` produces the PR decision and repair view. It
+preserves the execution model on every row, reports unique skill and
+model/skill-result counts, aggregates `adapter-summary.json` accounting, keeps
+Overfit visible, and uses distinct labels for improved, not proven improved,
+report-only preference loss, and invalid evidence. It states that objective
+regression is not enabled while `completionTransitions.gateEligible` is false.
+
+The compact table keeps only gate evidence, warnings, and the next action.
+`--format full` adds magnitude-weighted preference and absolute quality metrics
+and includes every result detail. Compact details are limited to non-passing,
+invalid, or warning-bearing results. Repeated-run W/T/L is shown only as
+reliability evidence, never beside the distinct-stimulus sign test as if both
+used the same inference unit.
+
 ## Practical preference floor
 
 The sign test proves that the direction is unlikely under a 50/50 null, but

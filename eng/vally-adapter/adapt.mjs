@@ -153,7 +153,7 @@ const MIN_PRACTICAL_NET_WIN = 0.2;
 
 // Minimum distinct stimulus votes behind a verdict. This is not a chosen
 // constant: the sign test cannot reach 5% on fewer than five discordant votes
-// (0.5^4 = 0.0625 > 0.05 >= 0.031 = 0.5^5), and discordant trials can never
+// (0.5^4 = 0.0625 > 0.05 >= 0.031 = 0.5^5), and discordant stimulus votes can never
 // exceed stimulus votes — so at four or fewer, no possible record produces a
 // pass. Reporting those as "underpowered" rather than as a failure is what
 // stops "won every trial, failed anyway" from being rediagnosed every run.
@@ -1099,8 +1099,8 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
                 : wins <= losses
                   ? "no improvement"
                   : discordant < MIN_CREDIBLE_STIMULI
-                    ? `not credible — ${ties} of ${directions.length} trial(s) tied, leaving only ` +
-                      `${discordant} discordant trial(s). The sign test conditions on non-tie ` +
+                    ? `not credible — ${ties} of ${directions.length} stimulus vote(s) tied, leaving only ` +
+                      `${discordant} discordant stimulus vote(s). The sign test conditions on non-tie ` +
                       `stimulus votes and cannot reach ${SIGN_TEST_ALPHA} below ${MIN_CREDIBLE_STIMULI}, so ` +
                       `no record could have passed here — this is not a measured null. Either the ` +
                       `skill is inert on these scenarios (make them discriminate) or the eval ` +

@@ -1,6 +1,6 @@
 # Investigating Evaluation Results (Vally)
 
-This guide is for AI agents (and humans) investigating skill evaluation failures produced by the **Vally** harness via `eng/vally-adapter/adapt.mjs`. It documents the `results.json` schema, how to reach the raw Vally output, common failure patterns, and recommended fixes.
+This guide is for AI agents (and humans) investigating non-passing, invalid, or warning-bearing skill evaluation results produced by the **Vally** harness via `eng/vally-adapter/adapt.mjs`. It documents the `results.json` schema, how to reach the raw Vally output, common result patterns, and recommended fixes.
 
 Evaluations run through Vally (`@microsoft/vally-cli`): every skill's `tests/<plugin>/<skill>/eval.yaml` is run in up to three variants — **baseline** (no skills), **skilled** (only the skill under test), and **plugin** (the whole plugin loaded). The workflow records the exact expected-eval manifest before execution. The adapter then runs `vally compare` (a debiased, position-swapped head-to-head judgment of skilled vs baseline) and writes one `results.json` per expected skill, including an explicit invalid result when required evidence is missing.
 
@@ -8,35 +8,52 @@ Evaluations run through Vally (`@microsoft/vally-cli`): every skill's `tests/<pl
 
 ## Using this guide with an AI agent
 
-When an evaluation has failures, the PR comment includes a ready-to-use prompt — copy it to your AI agent. The agent downloads the artifacts, reads this guide, analyzes the `results.json` files, and suggests fixes.
+When an evaluation has a non-pass or warning, the PR comment includes a ready-to-use prompt. Copy it to your AI agent. The agent downloads the artifacts, reads this guide, analyzes the `results.json` files, and suggests fixes.
 
 ## Quick start
 
 1. **Download the results artifacts:** `gh run download <run-id> --repo dotnet/skills --pattern "vally-results-*" --dir ./eval-results`
-2. **Skim the run's step summary** (the "Full Results" link) for the consolidated pass/fail table.
+2. **Skim the run's step summary** (the "Full Results" link) for the complete metrics and scenario tables.
 3. **Read `adapter-summary.json` and each `results.json`** (`eval-results/vally-results-*/<plugin>/<skill>/results.json`). The summary proves expected-versus-produced accounting; each skill file gives the compare state and evidence.
-4. **Identify the failure pattern** using the categories below and fix in priority order: infra/errored trials → timeouts → activation → quality/preference.
-5. **Apply the fix** and re-run with `/evaluate`.
+4. **Identify the result pattern** using the categories below and fix in priority order: invalid accounting or judge evidence → timeouts → activation → underpowered design → quality/preference.
+5. **Apply the fix**, push it, and evaluate that exact commit. Submit a PR review containing `/evaluate` (recommended), or comment `/evaluate <new-head-sha>` in the PR conversation.
 
 > The `--pattern "vally-results-*"` flag matters — without it, `gh` also tries to download non-zip artifacts and exits non-zero.
 
 ## The PR comment
 
-`eng/vally-adapter/consolidate.mjs` renders the comment (and the fuller step summary). Its table has these columns:
+`eng/vally-adapter/consolidate.mjs` renders the comment and the fuller step summary. The PR comment starts with:
+
+- the number of unique skills, execution models, and model/skill results;
+- the exact evaluated commit and judge model;
+- expected / observed / written result accounting, with missing, unexpected,
+  invalid, recovered, and unresolved counts; and
+- an explicit notice that the objective completion regression gate is not
+  enabled.
+
+Its compact table has these columns:
 
 | Column | Meaning |
 |--------|---------|
 | `Skill` | Skill under test |
-| `Result` | ✅ `VALID_PASS` / 🔻 objective `VALID_REGRESSION` / ❌ `VALID_NO_CHANGE` / 📉 report-only LLM preference loss / ⚠️ `INVALID_INCONCLUSIVE` |
-| `Net win` | `(wins − losses) / distinct stimulus votes`. Must be at least +20% for a pass |
-| `p` | One-sided exact sign test over discordant (non-tie) stimulus votes. A pass at `p ≤ 0.05` needs at least 5 winning votes |
-| `Δ Pref` | The same comparison weighted by how decisive each win was (`much-better` ±100%, `slightly-better` ±40%). Triage only; deliberately not gated on |
-| `W/T/L` | Wins / ties / losses after repeated runs collapse to one vote per stimulus |
-| `Quality` (+ `Quality (Plugin)` in the full step summary) / `Baseline` | Mean absolute judge score 0–5 for skilled isolated (and plugin) vs the skill-free control |
+| `Model` | Model used for the baseline and skilled agent runs. This prevents duplicate skill rows from being ambiguous |
+| `Verdict` | ✅ Improved / ➖ Not proven improved / 📉 Preference loss (report only) / ⚠️ Invalid or underpowered / 🔻 Objective regression when that future gate is enabled |
+| `Gate evidence` | `n` distinct-stimulus votes, stimulus W/T/L, `d` discordant votes, exact one-sided `p`, and net win. A pass needs `p ≤ 0.05` and net win ≥20% |
 | `Overfit` | Overfitting-judge severity — ✅ Low, 🟡 Moderate, 🔴 High, — none — with its score |
-| `Skills Loaded` | Of scenarios that expect activation, how many the skill activated / that total (plugin run shown when present); ⚠️ flags a scenario that expected activation but didn't activate |
+| `Warnings` | Activation gaps, timeouts, recovered judge slots, and unresolved comparison errors |
+| `Next action` | A cause-specific repair step. It does not recommend more repeated runs as a power fix |
 
-A collapsible **Column legend** and a per-skill **details** block follow the table. Each details block shows `state`, `stateReason`, comparison-error codes, retry recovery, authoritative stimulus-vote evidence, separate repeated-run reliability evidence, the human-readable `reason`, and a per-scenario table. `--format full` (the step summary) adds the `Quality (Plugin)` column; `--format simple` (the PR comment) omits it.
+A collapsible **How to read this report** block follows the table. The PR
+comment includes details only for non-passing, invalid, or warning-bearing
+results. Each block says why the result did not pass, gives the next repair
+action, names weak or warning scenarios, includes one clearly labeled
+illustrative judge excerpt when available, and separates repeated-run
+reliability from stimulus-vote gate evidence.
+
+`--format full` (the workflow summary) keeps every result and adds `Δ Pref`,
+isolated/plugin quality, and baseline quality. These are triage metrics. They
+are not the gate. The `p` value applies to one model/skill result; the renderer
+does not apply a matrix-wide multiple-comparison correction.
 
 ## Understanding `results.json`
 
@@ -118,7 +135,7 @@ The adapter's `results.json` is a summary. The uploaded artifact also contains t
 
 To see exactly what the agent did for a failing scenario, open its `events.jsonl` (match on `variant` + `stimulusName` in the sibling `metadata.json`).
 
-## Failure patterns and fixes
+## Result patterns and fixes
 
 Work top-down; earlier categories often cause later ones.
 
@@ -197,4 +214,14 @@ The gate is a **preference** comparison, not an absolute score. A high `skilledI
 
 ## Re-running
 
-Push the fix and comment `/evaluate` on the PR (optionally `/evaluate <plugin>` to scope). The workflow re-runs Vally, regenerates the verdicts, and updates the PR comment.
+Push the fix, then bind the new run to its exact commit:
+
+1. **Recommended:** open **Files changed → Review changes**, enter `/evaluate`,
+   and submit the review. GitHub supplies the reviewed commit ID.
+2. **PR conversation:** comment `/evaluate <new-head-sha>`. A bare conversation
+   comment does not run an evaluation because `issue_comment` has no trusted
+   commit identity.
+
+For a transient retry without a code change, use the exact SHA printed in the
+result comment. The workflow regenerates the verdicts and updates the PR
+comment.

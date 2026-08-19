@@ -363,6 +363,30 @@ esac
             steps["Run adapter fault-injection and report tests"]["run"],
         )
 
+    def test_pr_report_binds_identity_and_reruns_to_exact_commit(self) -> None:
+        workflow = yaml.safe_load(CALLER_WORKFLOW.read_text(encoding="utf-8"))
+        steps = {
+            step.get("name"): step
+            for step in workflow["jobs"]["comment-on-pr"]["steps"]
+        }
+        script = steps["Consolidate and post results"]["run"]
+
+        self.assertEqual(
+            script.count(
+                '--commit "${{ needs.gate.outputs.head_sha }}"'
+            ),
+            2,
+        )
+        self.assertIn(
+            "To investigate non-passing or warning results",
+            script,
+        )
+        self.assertIn(
+            "comment `/evaluate %s` to retry this exact commit",
+            script,
+        )
+        self.assertNotIn("re-post `/evaluate`", script)
+
     def test_fork_checkout_is_blocked_and_adapter_code_is_trusted(self) -> None:
         workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
         steps = workflow["jobs"]["vally-evaluate"]["steps"]
@@ -384,23 +408,55 @@ esac
             caller["jobs"]["deploy-dashboard"]["if"],
         )
 
-        restore = by_name["Restore skill-validator archive"]
-        self.assertTrue(restore["uses"].startswith("actions/cache/restore@"))
+        download = by_name["Download trusted skill-validator archive"]
+        self.assertTrue(download["uses"].startswith("actions/download-artifact@"))
         self.assertEqual(
-            restore["with"]["key"],
-            "${{ needs.prepare-validator.outputs.cache-key }}",
+            download["with"]["name"],
+            "trusted-skill-validator-${{ github.run_id }}",
+        )
+        self.assertEqual(
+            download["with"]["path"],
+            "${{ runner.temp }}/trusted-validator-archive",
         )
         self.assertFalse(
-            any(step.get("uses", "").startswith("actions/cache@") for step in steps)
+            any(
+                step.get("uses", "").startswith(
+                    ("actions/cache", "actions/setup-dotnet")
+                )
+                for step in steps
+            )
+        )
+        self.assertFalse(
+            any("dotnet publish" in step.get("run", "") for step in steps)
         )
         producer_steps = workflow["jobs"]["prepare-validator"]["steps"]
         producer_by_name = {step.get("name"): step for step in producer_steps}
         producer_restore = producer_by_name["Restore skill-validator archive"]
         producer_save = producer_by_name["Save skill-validator archive"]
+        producer_upload = producer_by_name["Upload trusted skill-validator archive"]
         self.assertTrue(producer_save["uses"].startswith("actions/cache/save@"))
+        self.assertIn(
+            "github.event_name != 'issue_comment'",
+            producer_save["if"],
+        )
         self.assertEqual(
             producer_restore["with"]["key"],
             "${{ steps.cache-key.outputs.key }}",
+        )
+        self.assertTrue(
+            producer_upload["uses"].startswith("actions/upload-artifact@")
+        )
+        self.assertEqual(
+            producer_upload["with"]["name"],
+            download["with"]["name"],
+        )
+        self.assertEqual(
+            producer_upload["with"]["path"],
+            "skill-validator-dist.tar.gz",
+        )
+        self.assertEqual(
+            producer_upload["with"]["if-no-files-found"],
+            "error",
         )
         cache_key_script = producer_by_name["Resolve trusted cache key"]["run"]
         self.assertIn(
@@ -419,11 +475,10 @@ esac
             stage_script,
         )
 
-        build_script = by_name["Build trusted skill-validator"]["run"]
-        self.assertIn('cd "$RUNNER_TEMP/trusted-validator-src"', build_script)
+        extract_script = by_name["Extract skill-validator"]["run"]
         self.assertIn(
-            '"eng/skill-validator/src/SkillValidator.csproj"',
-            build_script,
+            '"$RUNNER_TEMP/trusted-validator-archive/skill-validator-dist.tar.gz"',
+            extract_script,
         )
 
         run_script = by_name["Run vally evaluations"]["run"]
@@ -455,6 +510,9 @@ esac
             "Vally comparison watchdog expired after 45 minutes",
             run_script,
         )
+        summary_script = by_name["Write summary"]["run"]
+        self.assertIn('ICON="➖"', summary_script)
+        self.assertNotIn('ICON="❌"', summary_script)
         self.assertNotIn(
             "watchdog expired after 45 minutes; uploading partial results",
             run_script,

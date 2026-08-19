@@ -732,7 +732,7 @@ test("records that miss 5% by the exact test do not pass", () => {
 // A record can clear the distinct-stimulus floor and still be unwinnable,
 // because the sign test only sees discordant stimulus votes. Run 30611635547 reported
 // five such evals as plain failures; `code-testing-agent` won its single
-// discordant trial (1W/4T/0L) and read as "not credible p=0.500 > 0.05", which
+// discordant stimulus vote (1W/4T/0L) and read as "not credible p=0.500 > 0.05", which
 // describes a measured null rather than a test that could not be run. The
 // verdict stays a failure — ties are evidence of inertness, not of a small eval,
 // so this must NOT be relabelled `underpowered` — but the reason has to say that
@@ -744,18 +744,18 @@ test("a tie-starved record says no record could have passed, not that none did",
   assert.equal(v.signTest.discordant, 1);
   assert.equal(v.passed, false);
   assert.equal(v.regressed, false);
-  assert.match(v.reason, /4 of 5 trial\(s\) tied, leaving only 1 discordant trial\(s\)/);
+  assert.match(v.reason, /4 of 5 stimulus vote\(s\) tied, leaving only 1 discordant stimulus vote\(s\)/);
   assert.match(v.reason, /no record could have passed here — this is not a measured null/);
   assert.match(v.reason, /inert/);
 
-  // 4W/1T/0L: four discordant trials, one short. Same class of unwinnable
+  // 4W/1T/0L: four discordant stimulus votes, one short. Same class of unwinnable
   // record, and the wording must not collapse to the bare p-value again.
   const four = gate([0.4, 0.4, 0.4, 0.4, 0]);
   assert.equal(four.signTest.discordant, 4);
   assert.equal(four.passed, false);
   assert.match(four.reason, /no record could have passed here/);
 
-  // Five discordant trials is where the test becomes winnable, so a record that
+  // Five discordant stimulus votes is where the test becomes winnable, so a record that
   // merely loses on the evidence keeps the plain p-value wording.
   const winnable = gate([0.4, 0.4, 0.4, 0.4, -0.4]);
   assert.equal(winnable.signTest.discordant, 5);
