@@ -304,7 +304,7 @@ tie is survivable (5W/1T/0L); at 7, up to two are (5W/2T/0L). A loss is not. Fiv
 floor*, not adequate
 power. Add **discriminating stimuli** for task breadth. Use `runs` only to measure pass rate,
 pass@k, pass^k, and flakiness for the same tasks. See
-[`eng/eval-quality/README.md`](eng/eval-quality/README.md) for the full derivation and for the ten
+[`eng/eval-quality/README.md`](eng/eval-quality/README.md) for the full derivation and for the eleven
 structural defects the CI quality gate blocks.
 
 Run the gate locally before pushing:

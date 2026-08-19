@@ -162,9 +162,9 @@ five distinct stimuli no possible record passes**, however good the skill is.
 Five is derived from this repository's predeclared `alpha=0.05`; it is not a
 Vally recommendation.
 
-| Stimulus votes | Best possible record | Exact `p` |
+| Stimulus votes | Minimum passing record | Exact `p` |
 | ---: | --- | ---: |
-| 1–4 | a clean sweep | ≥ 0.0625 — cannot pass |
+| 1–4 | none; even a clean sweep cannot pass | ≥ 0.0625 |
 | 5 | 5W/0T/0L | 0.03125 |
 | 8 | 5W/3T/0L | 0.03125 |
 

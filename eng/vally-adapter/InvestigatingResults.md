@@ -84,10 +84,10 @@ A verdict carries **both** the head-to-head preference and absolute per-role dat
 | `passed` | **The gate.** `true` only when `conclusive`, at least 5 distinct stimuli were counted, `signTest.pValue <= 0.05`, and `netWin >= 0.20` |
 | `netWin` | `(wins − losses) / stimulus votes` — the effect size the gate reads. Magnitude-free, so an identical stimulus W/T/L record always yields an identical verdict |
 | `practicalSignificance` | `{ netWin, minimum, passed }`. The absolute directional effect must reach 20%; this blocks sparse records such as `5W/95T/0L` |
-| `signTest` | `{ wins, ties, losses, discordant, pValue, alpha }` — exact one-sided binomial tail over discordant stimulus votes. **This is what decides.** Ties cannot support a win, so they hold `discordant` down |
-| `regressed` / `preferenceRegressed` | Compatibility and explicit fields for a credible LLM preference loss. Under schema version 2 this maps to `VALID_NO_CHANGE`, not `VALID_REGRESSION`, because ordinal LLM preference is not objective completion evidence. Renderers apply the same report-only meaning to legacy records that have `regressed: true` but no `state` |
+| `signTest` | `{ wins, ties, losses, discordant, direction, pValue, alpha }` — exact one-sided binomial tail over discordant stimulus votes. **This is what decides.** Ties cannot support a win, so they hold `discordant` down |
+| `regressed` / `preferenceRegressed` | Compatibility and explicit fields for a credible LLM preference loss. In the current schema version 3 this maps to `VALID_NO_CHANGE`, not `VALID_REGRESSION`, because ordinal LLM preference is not objective completion evidence. Renderers apply the same report-only meaning to legacy records that have `regressed: true` but no `state` |
 | `conclusive` | `false` when the comparison did not complete: errored runs, unmatched trajectories, or a summary that disagrees with its own `stimuli[].trials` |
-| `underpowered` | `true` when a *completed* comparison counted fewer than `minCredibleStimuli` distinct stimuli, so no record could have reached `p <= 0.05`. Rendered ⚠️ — never a pass, never a regression. Disjoint from `conclusive` |
+| `underpowered` | `true` only when a completed, `conclusive: true` comparison counted fewer than `minCredibleStimuli` distinct stimuli, so no record could have reached `p <= 0.05`. Rendered ⚠️ — never a pass, never a regression. This is separate from the `conclusive: false` error path |
 | `minCredibleStimuli` | The distinct-stimulus floor in force (5). See `eng/eval-quality/README.md` for why |
 | `minCredibleTrials` | Compatibility alias for `minCredibleStimuli` |
 | `meanScore` | Vally's magnitude-weighted mean preference (`much-better` ±1.0, `slightly-better` ±0.4), −1..1. **Triage only — not the gate**; weighting the statistic by magnitude is what made verdicts flip in dotnet/skills#952 |
@@ -204,14 +204,17 @@ completion invariants, and compare JSONL exposes only aggregate booleans.
 Therefore the state remains reserved and the aggregate transition remains
 report-only.
 
-### Vally 0.13 comparison identity
+### Comparison slot identity
 
-Vally 0.13 comparison trials retain the `(stimulusName, trialIndex)` identity
-used by retry merging. Repeated compare calls over the same persisted inputs
-produce the same indices. Do not treat the index as a durable ID across
-regenerated runs or future Vally versions. An all-errored comparison exits
-nonzero in 0.13 after writing its report; the adapter reads that report so it
-can retry and classify the failure.
+Comparison trials use `(stimulusName, trialIndex)` as the retry slot identity.
+Repeated compare calls over the same persisted inputs must produce the same
+indices. The adapter rejects missing or duplicate identities instead of pairing
+trials by array position. Treat the index as scoped to one persisted experiment,
+not as a durable ID across regenerated runs.
+
+If compare writes a structured report but exits nonzero, the adapter still
+reads the report so it can classify and retry errored slots. A nonzero exit with
+no report remains an invocation failure.
 
 ### 7. Quality looks fine but the skill still fails the gate
 The gate is a **preference** comparison, not an absolute score. A high `skilledIsolated.judgeResult.overallScore` that isn't clearly better than `baseline.judgeResult.overallScore` will not pass. Focus on the *delta* over baseline, not the absolute number.
