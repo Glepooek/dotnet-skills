@@ -524,6 +524,14 @@ jobs:
             rm -rf "$PROBE_HOME"
             PROBE_HOME=$(mktemp -d)
             for probe_model in "${PROBE_MODELS[@]}"; do
+              # Some models (e.g. claude-haiku-4.5) do not support reasoning-effort
+              # configuration and exit non-zero when given --effort, which would
+              # wrongly reject an otherwise-healthy PAT. Only pass --effort to
+              # models that accept it.
+              probe_effort_args=(--effort=low)
+              case "$probe_model" in
+                claude-haiku-4.5) probe_effort_args=() ;;
+              esac
               set +e
               (
                 cd "$RUNNER_TEMP"
@@ -536,7 +544,7 @@ jobs:
                   --model "$probe_model" \
                   --output-format=json \
                   --silent \
-                  --effort=low >"$PROBE_LOG" 2>&1
+                  "${probe_effort_args[@]}" >"$PROBE_LOG" 2>&1
               )
               probe_status=$?
               set -e
