@@ -2,6 +2,10 @@
 
 This guide is for AI agents (and humans) investigating non-passing, invalid, or warning-bearing skill evaluation results produced by the **Vally** harness via `eng/vally-adapter/adapt.mjs`. It documents the `results.json` schema, how to reach the raw Vally output, common result patterns, and recommended fixes.
 
+For the end-to-end architecture, decision policy, metric definitions, and
+historical examples, start with the
+[Skill evaluation infrastructure overview](./README.md).
+
 Evaluations run through Vally (`@microsoft/vally-cli`): every skill's `tests/<plugin>/<skill>/eval.yaml` is run in up to three variants — **baseline** (no skills), **skilled** (only the skill under test), and **plugin** (the whole plugin loaded). The workflow records the exact expected-eval manifest before execution. The adapter then runs `vally compare` (a debiased, position-swapped head-to-head judgment of skilled vs baseline) and writes one `results.json` per expected skill, including an explicit invalid result when required evidence is missing.
 
 > Note: the linter (`skill-validator check`) is a **separate** workflow (`skill-check.yml`) and is unrelated to these eval results.

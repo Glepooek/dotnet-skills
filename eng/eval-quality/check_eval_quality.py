@@ -364,12 +364,13 @@ def check_cobertura() -> None:
 def eval_evidence_counts(doc: dict) -> tuple[int, int, int]:
     """(distinct stimuli, runs per stimulus, paired runs) for one eval spec.
 
-    The pass gate gives each distinct stimulus one vote. `defaults.runs`
-    measures reliability within that stimulus and does not increase the
-    cross-task sample size.
+    The pass gate gives each distinct stimulus one vote. `defaults.runs` (or
+    its deprecated `config.runs` alias) measures reliability within that
+    stimulus and does not increase the cross-task sample size.
     """
     scenarios = len(doc.get("stimuli") or [])
-    runs = (doc.get("defaults") or {}).get("runs", 1)
+    settings = doc.get("defaults") or doc.get("config") or {}
+    runs = settings.get("runs", 1)
     if not isinstance(runs, int) or isinstance(runs, bool) or runs < 1:
         runs = 1
     return scenarios, runs, scenarios * runs

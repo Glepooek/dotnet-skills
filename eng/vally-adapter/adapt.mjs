@@ -860,7 +860,7 @@ function runCompareWithRetry(baselineSlice, skilledSlice, outFile) {
     return merged;
   }
 
-  warn(`vally compare retry did not reduce errored trials; keeping the original result`);
+  warn(`vally compare retry did not reduce errored trials; returning the merged report with original judgments and retry diagnostics`);
   return merged;
 }
 

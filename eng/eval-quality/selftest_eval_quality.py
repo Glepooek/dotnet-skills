@@ -263,6 +263,13 @@ def grandfathered_reports_its_arithmetic(d):
     write_allowlist(d, SPEC)
 
 
+def grandfathered_config_alias_reports_its_runs(d):
+    # Existing specs can still use Vally's deprecated `config:` alias. The
+    # quality report must not silently reset their reliability count to one.
+    write_single_stimulus(d, runs=4, settings_key="config")
+    write_allowlist(d, SPEC)
+
+
 def guard_with_reject_skills(d):
     with open(EV(d), "a") as f:
         f.write(
@@ -327,11 +334,11 @@ def write_allowlist(d, *entries):
             f.write(entry + "\n")
 
 
-def write_single_stimulus(d, runs=1):
+def write_single_stimulus(d, runs=1, settings_key="defaults"):
     with open(EV(d), "w") as f:
         f.write(
             "name: widget\n"
-            "defaults:\n"
+            f"{settings_key}:\n"
             f"  runs: {runs}\n"
             "stimuli:\n"
             "  - name: Does the thing\n"
@@ -450,6 +457,9 @@ results = [
     output_case("grandfathered warning separates stimuli and runs",
                 grandfathered_reports_its_arithmetic,
                 "1 distinct stimulus/stimuli x runs=1 (1 paired run(s))"),
+    output_case("deprecated config.runs remains visible",
+                grandfathered_config_alias_reports_its_runs,
+                "1 distinct stimulus/stimuli x runs=4 (4 paired run(s))"),
     case("stale exemption for an eval that now qualifies", allowlisted_eval_that_now_meets_the_floor, expect_fail=True),
     case("exemption for a spec that no longer exists", allowlist_entry_for_a_spec_that_does_not_exist, expect_fail=True),
     case("exemption for an agent.* eval that never needs one", agent_eval_exempted, expect_fail=True),

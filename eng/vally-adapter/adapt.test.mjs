@@ -317,7 +317,11 @@ test("keeps a persistent comparison error visible after one retry", () => {
     );
     assert.equal(verdict.comparisonAttempts.persistentErrors.length, 5);
     assert.match(verdict.reason, /inconclusive \(comparison errors\)/);
-    assert.match(processOutput(result), /did not reduce errored trials/);
+    assert.match(
+      processOutput(result),
+      /returning the merged report with original judgments and retry diagnostics/,
+    );
+    assert.doesNotMatch(processOutput(result), /keeping the original result/);
   });
 });
 
