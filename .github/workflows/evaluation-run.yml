@@ -184,6 +184,8 @@ jobs:
     env:
       COPILOT_RATE_LIMIT_PATTERN: >-
         "errorType"[[:space:]]*:[[:space:]]*"rate_limit"|API rate limit exceeded|rate[ -]?limit exceeded|too many requests|user_weekly_rate_limited|weekly[ _-]?rate[ _-]?limit|HTTP([[:space:]]+status)?[[:space:]]+429|status([[:space:]]*code)?[[:space:]=:]+429
+      COPILOT_TOKEN_UNAVAILABLE_PATTERN: >-
+        HTTP([[:space:]]+status)?[[:space:]:=]+401|status([[:space:]]*code)?[[:space:]=:]+401|unauthori[sz]ed|bad credentials|authentication token[[:space:]]+(found[[:space:]]+but[[:space:]]+)?could not be validated|(invalid|expired|revoked)[[:space:]]+(authentication[[:space:]]+|access[[:space:]]+)?(credential(s)?|token)|(authentication|access|github|copilot)[[:space:]]+(credential(s)?|token)[[:space:]]+(is[[:space:]]+|was[[:space:]]+|has([[:space:]]+been)?[[:space:]]+)?(invalid|expired|revoked)|organi[sz]ation[[:space:]]+(has[[:space:]]+been|is|was)[[:space:]]+(disabled|suspended)|(disabled|suspended)[[:space:]]+by[[:space:]]+(your|the|this|an?)[[:space:]]+organi[sz]ation
     name: vally (${{ matrix.entry.name }})
     strategy:
       fail-fast: false
@@ -508,6 +510,7 @@ jobs:
           PROBE_HOME=$(mktemp -d)
           trap 'rm -f "$PROBE_LOG"; rm -rf "$PROBE_HOME"' EXIT
           saw_timed_out=false
+          saw_unavailable=false
 
           for ((candidate_index = 0; candidate_index < ${#PAT_NUMBERS[@]}; candidate_index++)); do
             candidate_number="${PAT_NUMBERS[$candidate_index]}"
@@ -563,7 +566,15 @@ jobs:
                 break
               fi
 
-              echo "::error::Copilot PAT pool entry $candidate_number failed its $probe_model availability probe with a non-rate-limit error (exit $probe_status); refusing to hide a token or service configuration failure"
+              if grep -Eiq "$COPILOT_TOKEN_UNAVAILABLE_PATTERN" "$PROBE_LOG"; then
+                echo "::warning::Copilot PAT pool entry $candidate_number has unusable credentials or belongs to a disabled organization; quarantining it and trying another entry"
+                cat "$PROBE_LOG"
+                candidate_rejected=true
+                saw_unavailable=true
+                break
+              fi
+
+              echo "::error::Copilot PAT pool entry $candidate_number failed its $probe_model availability probe with an unexpected non-rate-limit error (exit $probe_status); refusing to hide a service or configuration failure"
               cat "$PROBE_LOG"
               exit "$probe_status"
             done
@@ -579,7 +590,9 @@ jobs:
             exit 0
           done
 
-          if [ "$saw_timed_out" = true ]; then
+          if [ "$saw_unavailable" = true ]; then
+            echo "::error::No healthy Copilot PAT pool entry was found; at least one configured entry was unavailable and the remaining entries were unavailable, rate-limited, or timed out"
+          elif [ "$saw_timed_out" = true ]; then
             echo "::error::No healthy Copilot PAT pool entry was found; configured entries were rate-limited or timed out"
           else
             echo "::error::Every configured Copilot PAT pool entry is rate-limited"

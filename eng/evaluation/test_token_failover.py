@@ -43,6 +43,13 @@ def rate_limit_pattern() -> str:
     return workflow["jobs"]["vally-evaluate"]["env"]["COPILOT_RATE_LIMIT_PATTERN"]
 
 
+def token_unavailable_pattern() -> str:
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    return workflow["jobs"]["vally-evaluate"]["env"][
+        "COPILOT_TOKEN_UNAVAILABLE_PATTERN"
+    ]
+
+
 class TokenFailoverTests(unittest.TestCase):
     def run_selector(
         self,
@@ -90,6 +97,9 @@ case "$COPILOT_GITHUB_TOKEN" in
   timed-out) exit 124 ;;
   unauthorized) echo "401 Unauthorized" >&2; exit 7 ;;
   unauthorized-after-effort) echo "401 Unauthorized after effort retry" >&2; exit 7 ;;
+  disabled) echo "This organization has been disabled" >&2; exit 8 ;;
+  service-error) echo "Unexpected internal service failure" >&2; exit 9 ;;
+  model-error) echo "Model gpt-401 not found" >&2; exit 10 ;;
   healthy) exit 0 ;;
   *) echo "unexpected test token" >&2; exit 9 ;;
 esac
@@ -114,6 +124,7 @@ esac
                     "PROBE_MODEL": model,
                     "PROBE_JUDGE_MODEL": judge_model,
                     "COPILOT_RATE_LIMIT_PATTERN": rate_limit_pattern(),
+                    "COPILOT_TOKEN_UNAVAILABLE_PATTERN": token_unavailable_pattern(),
                     "TOKEN_RANDOM_SEED": "1",
                 }
             )
@@ -210,31 +221,84 @@ esac
         self.assertEqual(result.selected_token, "healthy")
         self.assertIn("retrying its availability probe without --effort", result.stdout)
 
-    def test_model_without_effort_support_fails_closed_after_one_retry(self) -> None:
+    def test_model_without_effort_support_fails_over_after_one_retry(self) -> None:
         result = self.run_selector(
             {0: "unauthorized-after-effort", 1: "healthy"},
             model="no-effort-model",
             judge_model="judge-model",
         )
 
-        self.assertEqual(result.returncode, 7)
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             result.attempts,
-            ["unauthorized-after-effort", "unauthorized-after-effort"],
+            [
+                "unauthorized-after-effort",
+                "unauthorized-after-effort",
+                "healthy",
+                "healthy",
+                "healthy",
+            ],
         )
-        self.assertEqual(result.models, ["no-effort-model", "no-effort-model"])
-        self.assertIsNone(result.selected_token)
-        self.assertIn("non-rate-limit error", result.stdout)
+        self.assertEqual(
+            result.models,
+            [
+                "no-effort-model",
+                "no-effort-model",
+                "no-effort-model",
+                "no-effort-model",
+                "judge-model",
+            ],
+        )
+        self.assertEqual(result.selected_token, "healthy")
+        self.assertIn("has unusable credentials", result.stdout)
         self.assertIn("401 Unauthorized after effort retry", result.stdout)
 
-    def test_non_rate_limit_failure_does_not_try_another_token(self) -> None:
-        result = self.run_selector({0: "unauthorized", 1: "healthy"})
+    def test_unavailable_candidate_fails_over_to_healthy_candidate(self) -> None:
+        for unavailable_token in ("unauthorized", "disabled"):
+            with self.subTest(unavailable_token=unavailable_token):
+                result = self.run_selector(
+                    {0: unavailable_token, 1: "healthy"}
+                )
 
-        self.assertEqual(result.returncode, 7)
-        self.assertEqual(result.attempts, ["unauthorized"])
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    result.attempts, [unavailable_token, "healthy"]
+                )
+                self.assertEqual(result.selected_token, "healthy")
+                self.assertIn(
+                    "quarantining it and trying another entry", result.stdout
+                )
+
+    def test_unrelated_failure_does_not_try_another_candidate(self) -> None:
+        for failing_token in ("service-error", "model-error"):
+            with self.subTest(failing_token=failing_token):
+                result = self.run_selector(
+                    {0: failing_token, 1: "healthy"}
+                )
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.attempts, [failing_token])
+                self.assertIsNone(result.selected_token)
+                self.assertIn(
+                    "unexpected non-rate-limit error", result.stdout
+                )
+                self.assertIn(
+                    "refusing to hide a service or configuration failure",
+                    result.stdout,
+                )
+
+    def test_all_unavailable_candidates_fail_clearly(self) -> None:
+        result = self.run_selector({0: "unauthorized", 1: "disabled"})
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.attempts, ["unauthorized", "disabled"])
         self.assertIsNone(result.selected_token)
-        self.assertIn("non-rate-limit error", result.stdout)
-        self.assertIn("401 Unauthorized", result.stdout)
+        self.assertIn(
+            "No healthy Copilot PAT pool entry was found", result.stdout
+        )
+        self.assertIn(
+            "at least one configured entry was unavailable", result.stdout
+        )
 
     def test_all_rate_limited_candidates_fail_clearly(self) -> None:
         result = self.run_selector({0: "rate-limited", 1: "weekly-rate-limited"})
@@ -243,6 +307,45 @@ esac
         self.assertEqual(result.attempts, ["rate-limited", "weekly-rate-limited"])
         self.assertIsNone(result.selected_token)
         self.assertIn("Every configured Copilot PAT pool entry is rate-limited", result.stdout)
+
+    def test_token_unavailable_pattern_matches_credential_failures(self) -> None:
+        pattern = token_unavailable_pattern()
+
+        for message in (
+            "Failed to fetch PAT user login (401): Bad credentials.",
+            "Authentication token found but could not be validated.",
+            "The authentication token has expired.",
+            "This organization has been disabled.",
+            "Copilot access was disabled by your organization.",
+        ):
+            with self.subTest(message=message):
+                env = os.environ.copy()
+                env.update({"PATTERN": pattern, "MESSAGE": message})
+                result = subprocess.run(
+                    [BASH, "-c", 'printf "%s\\n" "$MESSAGE" | grep -Eiq "$PATTERN"'],
+                    env=env,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, message)
+
+        for message in (
+            "Unexpected internal service failure",
+            "Internal server error: request id req-2401 failed",
+            "Upstream returned HTTP 500 after 2.401 seconds",
+            "Model gpt-401 not found",
+            "Processed 12401 tokens before crashing",
+            "Service unavailable: token bucket refill expired",
+            "Configuration error: organization policy disabled telemetry",
+        ):
+            with self.subTest(message=message):
+                env = os.environ.copy()
+                env.update({"PATTERN": pattern, "MESSAGE": message})
+                result = subprocess.run(
+                    [BASH, "-c", 'printf "%s\\n" "$MESSAGE" | grep -Eiq "$PATTERN"'],
+                    env=env,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 1, message)
 
     def test_actual_run_uses_shared_rate_limit_pattern(self) -> None:
         workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
