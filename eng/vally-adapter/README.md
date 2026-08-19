@@ -126,6 +126,12 @@ These are planning values, not Vally requirements. Ties require more total
 stimuli because they do not enter the sign test. A non-pass is therefore not
 proof that the skill has no effect.
 
+The table is sign-test power before the 20% practical floor. At a true 60%
+conditional win rate, 158 votes give the sign test 80.6% power, but the combined
+gate passes about 52.2% of records because the expected effect sits exactly on
+the floor. The gate is intended to certify effects above that practical
+threshold.
+
 ## Objective completion contract
 
 `VALID_REGRESSION` stays reserved until the harness can compute this tri-state

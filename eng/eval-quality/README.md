@@ -1,10 +1,8 @@
 # Eval quality gate
 
-`check_eval_quality.py` blocks defect classes that have each already cost a real
-evaluation result on this repo. Every one of them was invisible to the existing
-checks: the eval specs parsed, `skill-validator` passed, and the damage only
-showed up as a skill mysteriously losing to its own baseline — or as a skill
-winning every trial and failing anyway.
+`check_eval_quality.py` blocks structural defects that can corrupt an eval
+result. Most were first found only after an eval mysteriously lost to its own
+baseline or won every trial and still failed.
 
 Run it from the repository root:
 
@@ -16,7 +14,7 @@ python eng/eval-quality/selftest_eval_quality.py       # prove the gate still fi
 
 ## Failing checks
 
-All ten are **structural** — they inspect file existence, git state, declared
+All eleven are **structural** — they inspect file existence, git state, declared
 numbers, or YAML shape/keys. None of them interprets prose, so they cannot fire
 spuriously on a well-written eval.
 
@@ -198,6 +196,12 @@ stimuli because they do not enter the test. Eight stimuli are enough for 80%
 power only for a near-deterministic 90% conditional win rate. A non-pass is not
 proof of no effect.
 
+The table gives **sign-test power**, before the 20% practical floor is applied.
+At a true 60% conditional win rate, the floor is exactly at the expected effect:
+with 158 votes the sign test has 80.6% power, but the combined gate passes about
+52.2% of records and approaches 50% as the sample grows. The gate is designed to
+certify effects above its practical threshold, not effects that only equal it.
+
 Repeated runs still matter. Keep Vally's recommended run counts where the cost
 allows, and read `comparisonTrialEvidence` plus per-stimulus run W/T/L for
 reliability. Do not use those runs to clear the distinct-stimulus floor.
@@ -271,6 +275,14 @@ evaluate job still exits 0 with no verdicts, and the PR comment reports:
 So the one actionable signal points away from the cause, and the suggested fix
 re-runs a spec that can never load. Replace `config:` with one `defaults:` block
 that carries all settings.
+
+### 11. Duplicate stimulus names
+
+Vally pairs baseline and treatment trajectories by `(stimulus name, trial
+index)`. Two stimuli with the same name therefore create ambiguous comparison
+slots even when their prompts differ. The authoring gate requires every
+stimulus name in one eval to be unique; the runtime adapter also rejects missing
+or duplicate comparison slot identities.
 
 ## Why the gate scores direction, not magnitude
 

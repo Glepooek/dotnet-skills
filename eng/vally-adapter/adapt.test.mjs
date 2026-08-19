@@ -533,7 +533,64 @@ test("does not pair retry slots by array position when trialIndex is absent", ()
   assert.equal(merged.retrySummary.recoveredSlots, 0);
   assert.equal(
     merged.retrySummary.persistentErrors[0].attemptHistory[1].code,
-    "retry_result_missing",
+    "comparison_trial_identity_missing",
+  );
+});
+
+test("does not recover an ambiguous duplicate retry slot", () => {
+  const primary = reportFromRepeatedScores([null]);
+  primary.stimuli[0].trials[0] = {
+    trialIndex: 0,
+    score: 0,
+    winner: "tie",
+    errored: true,
+    evidence: "Comparison judge failed: Timeout after 120000ms waiting for session.idle",
+  };
+  primary.summary.trialCount = 0;
+  primary.summary.erroredCount = 1;
+  primary.summary.wins = 0;
+
+  const retry = reportFromRepeatedScores([0.4, 0.4]);
+  retry.stimuli[0].trials[1].trialIndex = 0;
+  const merged = mergeComparisonReports(primary, retry);
+
+  assert.equal(merged.summary.erroredCount, 1);
+  assert.equal(merged.retrySummary.recoveredSlots, 0);
+  assert.equal(
+    merged.retrySummary.persistentErrors[0].attemptHistory[1].code,
+    "retry_result_ambiguous",
+  );
+});
+
+test("missing or duplicate comparison slot identities invalidate a verdict", () => {
+  const missing = reportFromScores([0.4, 0.4, 0.4, 0.4, 0.4]);
+  delete missing.stimuli[0].trials[0].trialIndex;
+  const missingVerdict = comparisonToVerdict(
+    missing,
+    IDENTITY,
+    EMPTY_ROLES,
+    new Set(),
+  );
+  assert.equal(missingVerdict.conclusive, false);
+  assert.equal(missingVerdict.state, VERDICT_STATES.INVALID_INCONCLUSIVE);
+  assert.equal(
+    missingVerdict.stateReason.code,
+    "comparison_trial_identity_missing",
+  );
+
+  const duplicate = reportFromStimulusRuns([[0.4, 0.4], [0.4], [0.4], [0.4]]);
+  duplicate.stimuli[0].trials[1].trialIndex = 0;
+  const duplicateVerdict = comparisonToVerdict(
+    duplicate,
+    IDENTITY,
+    EMPTY_ROLES,
+    new Set(),
+  );
+  assert.equal(duplicateVerdict.conclusive, false);
+  assert.equal(duplicateVerdict.state, VERDICT_STATES.INVALID_INCONCLUSIVE);
+  assert.equal(
+    duplicateVerdict.stateReason.code,
+    "comparison_trial_identity_duplicate",
   );
 });
 

@@ -127,6 +127,8 @@ own value rather than defaulting it.
   cued prompts inflate the overfit score and bias the baseline.
 - Each stimulus should discriminate a **different** property of the skill. Five stimuli covering one
   property give arithmetic, not evidence.
+- Give every stimulus a stable, unique `name`. Vally pairs comparison trajectories by
+  `(stimulus name, trial index)`; duplicate names make slot identity ambiguous.
 - Include a boundary / no-op stimulus for any skill that migrates or rewrites code, proving it
   leaves already-correct input alone.
 
@@ -299,10 +301,11 @@ EXPERIMENT_FILE=my-agent.experiment.yaml ./eng/run-skill-evals.sh <plugin>
 
 Read the trajectories rather than the verdict — there is no sign-test result for an agent eval.
 
-`check_eval_quality.py` blocks ten structural defect classes that each already cost a real result:
+`check_eval_quality.py` blocks eleven structural defect classes that can corrupt a result:
 missing or untracked fixtures, self-contradicting coverage fixtures, empty grader configs, dormancy
-guards with `reject_skills`, sub-floor stimulus counts, duplicate YAML keys, and `config:`/`defaults:`
-collisions. Do not add a new eval to `eng/eval-quality/underpowered-allowlist.txt` — the gate rejects
+guards with `reject_skills`, sub-floor stimulus counts, duplicate YAML keys or stimulus names, and
+`config:`/`defaults:` collisions. Do not add a new eval to
+`eng/eval-quality/underpowered-allowlist.txt` — the gate rejects
 allowlist entries that are new relative to the base branch.
 
 For the official run, submit a PR review containing `/evaluate` so it binds to the reviewed commit.
@@ -312,7 +315,7 @@ For the official run, submit a PR review containing `/evaluate` so it binds to t
 - [ ] Directory is `tests/<plugin>/<skill-name>/` or `tests/<plugin>/agent.<agent-name>/`
 - [ ] Spec uses `stimuli:` / `graders:`, and exactly one of `defaults:` or `config:`
 - [ ] For a skill eval, at least 5 distinct stimuli exist, with more for the effect and tie rate that must be detected (agent evals are exempt)
-- [ ] Each stimulus discriminates a different property
+- [ ] Each stimulus discriminates a different property and has a stable, unique name
 - [ ] Prompts never name the skill, the agent, or its vocabulary
 - [ ] Every referenced fixture exists and is tracked by `git ls-files`
 - [ ] Every fixture behaves as its stimulus assumes — healthy ones build, deliberately broken ones fail only for the stated reason
@@ -338,6 +341,7 @@ For the official run, submit a PR review containing `/evaluate` so it binds to t
 | `expect_tools: [bash]` on an advisory question | Drop it; it causes timeouts, not quality |
 | Timeout too short for code generation | Use ~360s; empty output fails every grader |
 | Duplicate YAML key left behind by an edit | It overwrites the next stimulus field by field — delete the stray block |
+| Duplicate stimulus names | Vally uses names as comparison identity — give every stimulus a stable, unique name |
 | Direct activation-graded eval for a `disable-model-invocation: true` skill | Cover it through a consumer skill, or grade the answer content as `filter-syntax` does |
 | Agent eval sized for the stimulus floor | `agent.*` evals get no verdict; size them for scenario coverage instead |
 | Agent eval "run" with `./eng/run-skill-evals.sh` | The glob drops it — use a widened `EXPERIMENT_FILE` |

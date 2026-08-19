@@ -569,8 +569,53 @@ function classifyComparisonError(evidence) {
 
 function comparisonTrialKey(stimulusName, trial) {
   const trialIndex = trial?.trialIndex;
-  if (trialIndex == null) return null;
-  return JSON.stringify([stimulusName ?? "", trialIndex]);
+  if (!stimulusName || !Number.isInteger(trialIndex) || trialIndex < 0) return null;
+  return JSON.stringify([stimulusName, trialIndex]);
+}
+
+function comparisonTrialIdentityErrors(report) {
+  const seen = new Set();
+  const duplicates = new Set();
+  const errors = [];
+  for (const stimulus of report.stimuli ?? []) {
+    for (const trial of stimulus.trials ?? []) {
+      const key = comparisonTrialKey(stimulus.stimulusName, trial);
+      if (key === null) {
+        errors.push({
+          phase: "comparison_pairing",
+          kind: "permanent",
+          code: "comparison_trial_identity_missing",
+          message: "Comparison trial is missing trialIndex",
+          stimulusName: stimulus.stimulusName,
+          trialIndex: null,
+        });
+      } else if (seen.has(key) && !duplicates.has(key)) {
+        duplicates.add(key);
+        errors.push({
+          phase: "comparison_pairing",
+          kind: "permanent",
+          code: "comparison_trial_identity_duplicate",
+          message: "Comparison report contains a duplicate (stimulusName, trialIndex) slot",
+          stimulusName: stimulus.stimulusName,
+          trialIndex: trial.trialIndex,
+        });
+      } else {
+        seen.add(key);
+      }
+    }
+  }
+  return errors;
+}
+
+function comparisonTrialKeyCounts(report) {
+  const counts = new Map();
+  for (const stimulus of report.stimuli ?? []) {
+    for (const trial of stimulus.trials ?? []) {
+      const key = comparisonTrialKey(stimulus.stimulusName, trial);
+      if (key !== null) counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+  return counts;
 }
 
 function summarizeComparisonTrials(report, invalidateInterval = false) {
@@ -611,11 +656,13 @@ function summarizeComparisonTrials(report, invalidateInterval = false) {
  */
 function mergeComparisonReports(primaryReport, retryReport) {
   const report = structuredClone(primaryReport);
+  const primaryKeyCounts = comparisonTrialKeyCounts(primaryReport);
+  const retryKeyCounts = comparisonTrialKeyCounts(retryReport);
   const retryTrials = new Map();
   for (const stimulus of retryReport?.stimuli ?? []) {
     for (const trial of stimulus.trials ?? []) {
       const key = comparisonTrialKey(stimulus.stimulusName, trial);
-      if (key !== null) retryTrials.set(key, trial);
+      if (key !== null && retryKeyCounts.get(key) === 1) retryTrials.set(key, trial);
     }
   }
 
@@ -633,7 +680,9 @@ function mergeComparisonReports(primaryReport, retryReport) {
       retriedSlots++;
       const error = classifyComparisonError(trial.evidence);
       const retryKey = comparisonTrialKey(stimulus.stimulusName, trial);
-      const retry = retryKey === null ? undefined : retryTrials.get(retryKey);
+      const primaryIdentityIsUnique =
+        retryKey !== null && primaryKeyCounts.get(retryKey) === 1;
+      const retry = primaryIdentityIsUnique ? retryTrials.get(retryKey) : undefined;
       if (retry && !retry.errored) {
         recoveredErrors.push({
           stimulusName: stimulus.stimulusName,
@@ -648,14 +697,34 @@ function mergeComparisonReports(primaryReport, retryReport) {
         };
       }
 
-      const retryError = retry?.errored
-        ? classifyComparisonError(retry.evidence)
-        : {
-            phase: "comparison_judge",
-            kind: "unknown",
-            code: "retry_result_missing",
-            message: "Comparison retry did not return the planned trial slot",
-          };
+      const retryError = !primaryIdentityIsUnique
+        ? {
+            phase: "comparison_pairing",
+            kind: "permanent",
+            code:
+              retryKey === null
+                ? "comparison_trial_identity_missing"
+                : "comparison_trial_identity_duplicate",
+            message:
+              retryKey === null
+                ? "Original comparison trial is missing trialIndex"
+                : "Original comparison report contains a duplicate trial slot",
+          }
+        : retryKey !== null && (retryKeyCounts.get(retryKey) ?? 0) > 1
+          ? {
+              phase: "comparison_pairing",
+              kind: "permanent",
+              code: "retry_result_ambiguous",
+              message: "Comparison retry returned a duplicate trial slot",
+            }
+          : retry?.errored
+            ? classifyComparisonError(retry.evidence)
+            : {
+                phase: "comparison_judge",
+                kind: "unknown",
+                code: "retry_result_missing",
+                message: "Comparison retry did not return the planned trial slot",
+              };
       persistentErrors.push({
         stimulusName: stimulus.stimulusName,
         trialIndex: trial.trialIndex ?? index,
@@ -809,6 +878,7 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
   const unmatchedBaseline = report.unmatchedBaseline ?? [];
   const unmatchedTreatment = report.unmatchedTreatment ?? [];
   const unmatchedTrialCount = unmatchedBaseline.length + unmatchedTreatment.length;
+  const identityErrors = comparisonTrialIdentityErrors(report);
 
   // Raw paired trials remain authoritative for report-integrity checks, retry
   // accounting, and within-stimulus reliability. They are not independent task
@@ -836,7 +906,11 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
     );
   }
 
-  const conclusive = s.erroredCount === 0 && unmatchedTrialCount === 0 && summaryAgrees;
+  const conclusive =
+    s.erroredCount === 0 &&
+    unmatchedTrialCount === 0 &&
+    summaryAgrees &&
+    identityErrors.length === 0;
 
   // Collapse repeated runs to one vote per stimulus. A stimulus votes in the
   // direction supported by more of its successful runs; an even split or all
@@ -1074,11 +1148,13 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
   if (!conclusive) {
     state = VERDICT_STATES.INVALID_INCONCLUSIVE;
     stateReason =
-      unresolvedErrors.length > 0
-        ? { code: "comparison_judge_error", phase: "comparison_judge" }
-        : unmatchedTrialCount > 0
-          ? { code: "unmatched_trajectories", phase: "comparison_pairing" }
-          : { code: "comparison_summary_mismatch", phase: "adapter" };
+      identityErrors.length > 0
+        ? { code: identityErrors[0].code, phase: "comparison_pairing" }
+        : unresolvedErrors.length > 0
+          ? { code: "comparison_judge_error", phase: "comparison_judge" }
+          : unmatchedTrialCount > 0
+            ? { code: "unmatched_trajectories", phase: "comparison_pairing" }
+            : { code: "comparison_summary_mismatch", phase: "adapter" };
   } else if (underpowered) {
     state = VERDICT_STATES.INVALID_INCONCLUSIVE;
     stateReason = { code: "underpowered", phase: "eval_design" };
@@ -1168,7 +1244,7 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
       recoveredErrors: [],
       persistentErrors: [],
     },
-    errors: unresolvedErrors,
+    errors: [...identityErrors, ...unresolvedErrors],
     recoveredErrors,
     scenarios,
     reason,

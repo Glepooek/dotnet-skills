@@ -90,7 +90,7 @@ See [references/eval-triage.md](references/eval-triage.md) for the full catalogu
 
 ### Step 4: Verify the fixtures before touching the skill
 
-Run `python eng/eval-quality/check_eval_quality.py` — it blocks ten defect classes that each already
+Run `python eng/eval-quality/check_eval_quality.py` — it blocks eleven defect classes that can
 cost a real result here. Then confirm by hand:
 
 - every fixture behaves as its stimulus assumes — a fixture meant to be healthy builds, and one
@@ -204,5 +204,5 @@ result, confirm the skill payload actually changed — reruns on byte-identical 
 
 - [references/writing-for-baseline-delta.md](references/writing-for-baseline-delta.md) — content patterns that beat the unskilled model
 - [references/eval-triage.md](references/eval-triage.md) — symptom, cause and fix catalogue with PR citations
-- [eng/eval-quality/README.md](../../../eng/eval-quality/README.md) — the ten structural gate checks and why each exists
+- [eng/eval-quality/README.md](../../../eng/eval-quality/README.md) — the eleven structural gate checks and why each exists
 - [eng/vally-adapter/InvestigatingResults.md](../../../eng/vally-adapter/InvestigatingResults.md) — downloading artifacts and reading `results.json`. This is the current guide; the similarly-named `eng/skill-validator/src/docs/InvestigatingResults.md` documents the retired `skill-validator evaluate` schema and does not describe today's results.

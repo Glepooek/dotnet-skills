@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Eval quality gate.
 
-Codifies defect classes that have each cost a real evaluation result, so they
-cannot silently recur in any plugin.
+Codifies structural defect classes that can corrupt an evaluation result, so
+they cannot silently recur in any plugin.
 
 FAILS on unambiguous bugs:
   1. Referenced fixture missing on disk. The scenario fails at setup, which
@@ -41,6 +41,8 @@ FAILS on unambiguous bugs:
      alias for `defaults`; vally's loader throws on a spec carrying both, the
      evaluate job then produces no verdicts, and CI misreports that as a
      transient infrastructure failure.
+ 11. Duplicate stimulus names. Vally pairs comparison trajectories by stimulus
+     name and trial index, so names are slot identity, not display text.
 
 Every failing check above is structural — it inspects file existence, git
 state, declared numbers, or YAML shape/keys — so it cannot fire spuriously on
@@ -247,6 +249,23 @@ def check_spec_shape(spec: str, doc: dict, raw: str) -> None:
             f"for 'defaults' and vally's loader throws on a spec carrying both, so the evaluate "
             f"job produces no verdicts and CI misreports it as a transient infrastructure "
             f"failure. Merge them into one 'defaults:' block")
+
+
+def check_stimulus_names(spec: str, doc: dict) -> None:
+    """Require unique names because Vally uses them as comparison slot identity."""
+    seen: set[str] = set()
+    for index, stimulus in enumerate(doc.get("stimuli") or []):
+        if not isinstance(stimulus, dict):
+            continue
+        name = stimulus.get("name")
+        if not isinstance(name, str) or not name:
+            continue  # Vally schema validation owns missing or malformed names.
+        if name in seen:
+            errors.append(
+                f"{spec}: duplicate stimulus name {name!r} at stimuli[{index}]. "
+                f"Vally pairs trajectories by (stimulus name, trial index), so every "
+                f"stimulus name must be unique.")
+        seen.add(name)
 
 
 def check_dormancy_guards(spec: str, doc: dict) -> None:
@@ -687,6 +706,7 @@ def main() -> int:
         check_fixtures(spec, doc, tracked)
         check_graders(spec, doc)
         check_spec_shape(spec, doc, raw)
+        check_stimulus_names(spec, doc)
         check_dormancy_guards(spec, doc)
 
     check_cobertura()

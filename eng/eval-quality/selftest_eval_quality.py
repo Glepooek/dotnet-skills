@@ -248,6 +248,14 @@ def config_and_defaults_together(d):
         f.write("config:\n  timeout: 5m\n")
 
 
+def duplicate_stimulus_names(d):
+    path = EV(d)
+    with open(path) as f:
+        raw = f.read()
+    with open(path, "w") as f:
+        f.write(raw.replace("name: Does the edge thing", "name: Does the thing", 1))
+
+
 def grandfathered_reports_its_arithmetic(d):
     # The gate's job for a grandfathered eval is to tell the contributor what to
     # change, so the report must separate distinct stimuli from repeated runs.
@@ -427,6 +435,8 @@ results = [
     case("grader with an empty config enforces nothing", empty_grader_config, expect_fail=True),
     case("duplicate key silently overwrites a scenario", duplicate_stimulus_keys, expect_fail=True),
     case("spec declares both config: and defaults:", config_and_defaults_together, expect_fail=True),
+    case("duplicate stimulus names make slot identity ambiguous",
+         duplicate_stimulus_names, expect_fail=True),
     case("dormancy guard also sets reject_skills", guard_with_reject_skills, expect_fail=True),
     case("well-formed dormancy guard", guard_ok, expect_fail=False),
     output_case("reference skill carrying a direct-activation eval",
