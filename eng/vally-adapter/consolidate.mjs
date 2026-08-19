@@ -11,7 +11,8 @@
  *       preferenceRegressed,
  *       netWin, signTest:{wins,ties,losses,discordant,pValue,alpha},  // the gate
  *       meanScore, confidenceInterval:{low,high},  // magnitude, triage only
- *       winRate, wins, ties, losses, trialCount, erroredCount, reason,
+ *       winRate, wins, ties, losses, stimulusVoteCount, trialCount,
+ *       comparisonTrialEvidence, erroredCount, reason,
  *       scenarios: [ { scenarioName, skilledIsolated:{judgeResult:{overallScore}},
  *                      skilledPlugin?:{judgeResult:{overallScore}},
  *                      baseline:{judgeResult:{overallScore}} } ]
@@ -39,8 +40,8 @@ import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 
-// Reuse the adapter's trial-direction rule so the PR comment and the gate can
-// never disagree about who won a trial.
+// Reuse the adapter's run-direction rule so the PR comment and the gate can
+// never disagree about who won a repeated run.
 import { trialDirection } from "./adapt.mjs";
 
 const { values: opts, positionals } = parseArgs({
@@ -189,7 +190,7 @@ function activationCell(verdict) {
 // adapt.mjs computes these per scenario; the fallback re-derives them from the
 // trials for results.json files written before it did.
 function scenarioTable(verdict) {
-  const rows = ["| Scenario | Net win | Δ Pref | Trials (W/T/L) |", "|---|---|---|---|"];
+  const rows = ["| Scenario | Net win | Δ Pref | Runs (W/T/L) |", "|---|---|---|---|"];
   for (const s of verdict.scenarios ?? []) {
     let { netWin, wins, ties, losses } = s;
     if (typeof netWin !== "number") {
@@ -277,9 +278,9 @@ if (indeterminateCount > 0) {
   const parts = [];
   if (underpoweredCount > 0) {
     parts.push(
-      `**${underpoweredCount} underpowered** — the eval has fewer trials than any result needs ` +
+      `**${underpoweredCount} underpowered** — the eval has fewer distinct stimuli than any result needs ` +
         `to reach \`p ≤ 0.05\`, so no verdict was possible. This is the eval's size, **not a ` +
-        `skill regression**; fix it by adding scenarios or raising \`defaults.runs\``,
+        `skill regression**; fix it by adding independent, discriminating stimuli`,
     );
   }
   if (incompleteCount > 0) {
@@ -290,8 +291,9 @@ if (indeterminateCount > 0) {
 }
 lines.push("");
 lines.push(
-  `A skill passes only on a credible net win over baseline: more wins than losses, by an exact ` +
-    `one-sided sign test at \`p ≤ 0.05\`. LLM preference losses are reported separately from objective completion regressions.`,
+  `A skill passes only when one vote per distinct stimulus gives a net win of at least 20% ` +
+    `and an exact one-sided sign test at \`p ≤ 0.05\`. Repeated runs report reliability only. ` +
+    `LLM preference losses are separate from objective completion regressions.`,
 );
 lines.push("");
 
@@ -329,11 +331,11 @@ if (verdicts.length === 0) {
   // Legend / glossary — kept out of table cells so it renders reliably.
   lines.push("<details><summary>ℹ️ Column legend</summary>");
   lines.push("");
-  lines.push("- **Net win** — `(wins − losses) / trials` for skilled vs baseline, judged head-to-head by `vally compare`. **This is the effect the gate decides on.**");
-  lines.push("- **p** — one-sided exact sign test over the discordant (non-tie) trials. A skill passes only at `p ≤ 0.05`, which needs at least 5 winning trials.");
+  lines.push("- **Net win** — `(wins − losses) / distinct stimulus votes` for skilled vs baseline. Repeated runs for each stimulus collapse to one majority-direction vote. A pass also needs an absolute net win of at least 20%.");
+  lines.push("- **p** — one-sided exact sign test over discordant (non-tie) stimulus votes. A pass needs `p ≤ 0.05`, which requires at least 5 winning stimulus votes.");
   lines.push("- **Δ Pref** — the same comparison weighted by how decisive each win was (`much-better` ±100%, `slightly-better` ±40%). Reported for triage only: weighting the statistic by magnitude made a skill fail for winning *harder*, which is why the gate deliberately ignores this column.");
-  lines.push("- **W/T/L** — wins / ties / losses across trials.");
-  lines.push("- **⚠️** — the gate withheld a verdict. Either the eval has fewer trials than any result needs to reach `p ≤ 0.05` (**underpowered** — the skill was never actually measured, so this is not a regression; add scenarios or raise `defaults.runs`), or the comparison didn't complete.");
+  lines.push("- **W/T/L** — wins / ties / losses after each distinct stimulus contributes one vote.");
+  lines.push("- **⚠️** — the gate withheld a verdict. Either the eval has fewer than 5 distinct stimuli (**underpowered** — not a skill regression; repeated runs cannot fix it), or the comparison did not complete.");
   lines.push("- **🔻** — an objective completion regression. This state is reserved for objective completion evidence.");
   lines.push("- **📉** — a credible LLM preference loss. It is report-only and is not an objective completion regression.");
   lines.push("- **Quality / Baseline** — mean absolute judge score 0–5 (skilled isolated vs skill-free control).");
@@ -379,10 +381,18 @@ if (verdicts.length === 0) {
       ...((v.recoveredErrors?.length ?? 0) > 0
         ? [`**Retry recovery:** ${v.recoveredErrors.length} errored judgment slot(s) recovered; successful first-attempt judgments stayed fixed.`, ""]
         : []),
-      ...(v.scenarioEvidence
+      ...(v.scenarioEvidence?.gateEligible === true
         ? [
-            `**Effective scenarios (report only):** ${v.scenarioEvidence.count} ` +
+            `**Gate evidence (stimulus votes):** ${v.scenarioEvidence.count} ` +
               `(${v.scenarioEvidence.wins}W/${v.scenarioEvidence.ties}T/${v.scenarioEvidence.losses}L).`,
+            "",
+          ]
+        : []),
+      ...((v.comparisonTrialEvidence?.count ?? 0) > 0
+        ? [
+            `**Repeated-run reliability (not used by the gate):** ${v.comparisonTrialEvidence.count} ` +
+              `paired run(s) (${v.comparisonTrialEvidence.wins}W/${v.comparisonTrialEvidence.ties}T/` +
+              `${v.comparisonTrialEvidence.losses}L).`,
             "",
           ]
         : []),

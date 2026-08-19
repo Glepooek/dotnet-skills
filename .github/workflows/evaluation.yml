@@ -1873,7 +1873,8 @@ jobs:
         # verdict (claude-opus-4.8 judge) with its SECOND-judge verdict (claude-haiku-4.5) by
         # (executor model, skill) and record the SAME stat set for both judges
         # (state, preferenceRegressed, passed, conclusive, underpowered,
-        # meanScore, winRate, trialCount) plus an agreement flag, appending to an isolated
+        # meanScore, winRate, stimulus-vote count in legacy field `trialCount`) plus an
+        # agreement flag, appending to an isolated
         # judge-comparison.json. This is experiment-only data: it runs ONLY on the
         # scheduled dual-judge cadence (no crossjudge artifacts exist on PR runs, so
         # this step no-ops there), it is deliberately NOT listed in components.json

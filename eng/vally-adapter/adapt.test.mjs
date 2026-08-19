@@ -14,7 +14,7 @@ import {
   signTestPValue,
   trialDirection,
   VERDICT_STATES,
-  MIN_CREDIBLE_TRIALS,
+  MIN_CREDIBLE_STIMULI,
   MIN_PRACTICAL_NET_WIN,
   SIGN_TEST_ALPHA,
 } from "./adapt.mjs";
@@ -116,7 +116,11 @@ const report = {
     mcnemar: { baselineOnly: 0, treatmentOnly: 0, concordant: counted.length, pValue: 1, exact: true },
     metricDeltas: []
   },
-  stimuli: [{ stimulusName: "Scenario", meanScore: 0, trials }],
+  stimuli: trials.map((trial, stimulusIndex) => ({
+    stimulusName: "Scenario " + (stimulusIndex + 1),
+    meanScore: trial.score,
+    trials: [{ ...trial, trialIndex: 0 }],
+  })),
   unmatchedBaseline: unmatched ? ["Baseline only (trial 0)"] : [],
   unmatchedTreatment: unmatched ? ["Treatment only (trial 0)"] : []
 };
@@ -333,9 +337,8 @@ test("surfaces unmatched trajectories in the verdict", () => {
   });
 });
 
-// An eval with too few trials cannot clear the 95% CI bar at any effect size:
-// at one trial vally reports no interval at all (ciLow == mean), so before the
-// floor existed a single lucky judgment passed outright.
+// An eval with too few distinct stimuli cannot clear the exact sign-test bar at
+// any effect size, so one lucky task must not pass outright.
 test("reports a below-floor eval as underpowered rather than as a pass", () => {
   withTempDir((root) => {
     const { result, verdict } = runAdapter(root, "clean", 1);
@@ -346,9 +349,9 @@ test("reports a below-floor eval as underpowered rather than as a pass", () => {
     assert.equal(verdict.state, VERDICT_STATES.INVALID_INCONCLUSIVE);
     assert.equal(verdict.stateReason.code, "underpowered");
     assert.equal(verdict.minCredibleTrials, 5);
-    assert.match(verdict.reason, /underpowered \(1 counted trial\(s\); a credible verdict needs at least 5/);
+    assert.match(verdict.reason, /underpowered \(1 counted stimulus vote\(s\); a credible verdict needs at least 5/);
     assert.match(verdict.reason, /won every one of them/);
-    assert.match(verdict.reason, /defaults\.runs/);
+    assert.match(verdict.reason, /repeated runs do not increase task breadth/);
     assert.match(result.stdout, /⚠️/);
   });
 });
@@ -440,10 +443,12 @@ const EMPTY_ROLES = {
   hasPlugin: false,
 };
 
-// Build a compare report from raw trial scores, spreading them over one
-// stimulus. `summaryOverrides` lets a test assert that a field is NOT read.
-function reportFromScores(scores, summaryOverrides = {}) {
-  const counted = scores.filter((s) => s !== null);
+// Build a compare report from arrays of repeated-run scores, one array per
+// distinct stimulus. `summaryOverrides` lets a test assert that a field is NOT
+// read.
+function reportFromStimulusRuns(stimulusRuns, summaryOverrides = {}) {
+  const scores = stimulusRuns.flat();
+  const counted = scores.filter((score) => score !== null);
   const winnerOf = (s) => (s > 0 ? "treatment" : s < 0 ? "baseline" : "tie");
   return {
     summary: {
@@ -458,28 +463,31 @@ function reportFromScores(scores, summaryOverrides = {}) {
       winRate: counted.filter((s) => s > 0).length / (counted.length || 1),
       ...summaryOverrides,
     },
-    stimuli: [
-      {
-        stimulusName: "Scenario",
+    stimuli: stimulusRuns.map((runs, stimulusIndex) => ({
+        stimulusName: `Scenario ${stimulusIndex + 1}`,
         meanScore: 0,
-        trials: scores.map((score, trialIndex) => ({
+        trials: runs.map((score, trialIndex) => ({
           trialIndex,
           score,
           winner: winnerOf(score),
           errored: false,
         })),
-      },
-    ],
+      })),
     unmatchedBaseline: [],
     unmatchedTreatment: [],
   };
 }
 
+const reportFromScores = (scores, summaryOverrides = {}) =>
+  reportFromStimulusRuns(scores.map((score) => [score]), summaryOverrides);
+const reportFromRepeatedScores = (scores, summaryOverrides = {}) =>
+  reportFromStimulusRuns([scores], summaryOverrides);
+
 const gate = (scores, summaryOverrides) =>
   comparisonToVerdict(reportFromScores(scores, summaryOverrides), IDENTITY, EMPTY_ROLES, new Set());
 
 test("a retry fills only errored slots and freezes successful judgments", () => {
-  const primary = reportFromScores([null, 0.4, 0.4, 0.4, 0.4]);
+  const primary = reportFromRepeatedScores([null, 0.4, 0.4, 0.4, 0.4]);
   primary.stimuli[0].trials[0] = {
     trialIndex: 0,
     score: 0,
@@ -493,7 +501,7 @@ test("a retry fills only errored slots and freezes successful judgments", () => 
 
   // The retry recovers slot 0 but disagrees with every successful first-attempt
   // slot. Only slot 0 may be taken from this report.
-  const retry = reportFromScores([0.4, -0.4, -0.4, -0.4, -0.4]);
+  const retry = reportFromRepeatedScores([0.4, -0.4, -0.4, -0.4, -0.4]);
   const merged = mergeComparisonReports(primary, retry);
   const directions = merged.stimuli[0].trials.map(trialDirection);
 
@@ -510,14 +518,14 @@ test("a retry fills only errored slots and freezes successful judgments", () => 
 });
 
 test("does not pair retry slots by array position when trialIndex is absent", () => {
-  const primary = reportFromScores([null, 0.4]);
+  const primary = reportFromRepeatedScores([null, 0.4]);
   primary.stimuli[0].trials[0].errored = true;
   primary.summary.trialCount = 1;
   primary.summary.erroredCount = 1;
   primary.summary.wins = 1;
   for (const trial of primary.stimuli[0].trials) delete trial.trialIndex;
 
-  const retry = reportFromScores([-0.4, 0.4]);
+  const retry = reportFromRepeatedScores([-0.4, 0.4]);
   for (const trial of retry.stimuli[0].trials) delete trial.trialIndex;
 
   const merged = mergeComparisonReports(primary, retry);
@@ -544,18 +552,68 @@ test("classifies the known judge-side failures that must not become skill losses
   );
 });
 
-test("scenario evidence collapses repeated runs to one report-only vote", () => {
-  const verdict = gate([0.4, 0.4, 0.4, 0.4, 0.4]);
-  assert.equal(verdict.trialCount, 5);
+test("scenario evidence collapses repeated runs to one authoritative vote", () => {
+  const verdict = comparisonToVerdict(
+    reportFromRepeatedScores([0.4, 0.4, 0.4, 0.4, 0.4]),
+    IDENTITY,
+    EMPTY_ROLES,
+    new Set(),
+  );
+  assert.equal(verdict.comparisonTrialEvidence.count, 5);
+  assert.equal(verdict.comparisonTrialEvidence.gateEligible, false);
   assert.equal(verdict.scenarioEvidence.count, 1);
   assert.equal(verdict.scenarioEvidence.wins, 1);
   assert.equal(verdict.scenarioEvidence.pValue, 0.5);
-  assert.equal(verdict.scenarioEvidence.gateEligible, false);
+  assert.equal(verdict.scenarioEvidence.gateEligible, true);
+  assert.equal(verdict.stimulusVoteCount, 1);
+  assert.equal(verdict.trialCount, verdict.stimulusVoteCount, "legacy alias remains coherent");
+  assert.equal(verdict.minCredibleStimuli, 5);
+  assert.equal(verdict.minCredibleTrials, verdict.minCredibleStimuli, "legacy alias remains coherent");
+  assert.equal(verdict.underpowered, true);
+  assert.equal(verdict.passed, false);
+});
+
+test("repeated runs cannot manufacture significance from four of five stimuli", () => {
+  const report = reportFromStimulusRuns([
+    [0.4, 0.4, 0.4],
+    [0.4, 0.4, 0.4],
+    [0.4, 0.4, 0.4],
+    [0.4, 0.4, 0.4],
+    [-0.4, -0.4, -0.4],
+  ]);
+  const verdict = comparisonToVerdict(report, IDENTITY, EMPTY_ROLES, new Set());
+
+  assert.equal(verdict.comparisonTrialEvidence.wins, 12);
+  assert.equal(verdict.comparisonTrialEvidence.losses, 3);
+  assert.ok(signTestPValue(12, 3) <= SIGN_TEST_ALPHA, "pooled pseudo-replicates look significant");
+  assert.equal(verdict.signTest.wins, 4);
+  assert.equal(verdict.signTest.losses, 1);
+  assert.ok(verdict.signTest.pValue > SIGN_TEST_ALPHA);
+  assert.equal(verdict.passed, false);
+});
+
+test("repeated runs cannot hide agreement across all five stimuli", () => {
+  const report = reportFromStimulusRuns([
+    [0.4, 0.4, -0.4],
+    [0.4, 0.4, -0.4],
+    [0.4, 0.4, -0.4],
+    [0.4, 0.4, -0.4],
+    [0.4, 0.4, -0.4],
+  ]);
+  const verdict = comparisonToVerdict(report, IDENTITY, EMPTY_ROLES, new Set());
+
+  assert.equal(verdict.comparisonTrialEvidence.wins, 10);
+  assert.equal(verdict.comparisonTrialEvidence.losses, 5);
+  assert.ok(signTestPValue(10, 5) > SIGN_TEST_ALPHA, "pooled pseudo-replicates look inconclusive");
+  assert.equal(verdict.signTest.wins, 5);
+  assert.equal(verdict.signTest.losses, 0);
+  assert.ok(verdict.signTest.pValue <= SIGN_TEST_ALPHA);
+  assert.equal(verdict.passed, true);
 });
 
 test("aggregate completion transitions are telemetry, not a hard gate", () => {
   const report = reportFromScores([-0.4, -0.4, -0.4, -0.4, -0.4]);
-  for (const trial of report.stimuli[0].trials) {
+  for (const trial of report.stimuli.flatMap((stimulus) => stimulus.trials)) {
     trial.baselinePassed = true;
     trial.treatmentPassed = false;
   }
@@ -614,8 +672,8 @@ test("records that miss 5% by the exact test do not pass", () => {
   }
 });
 
-// A record can clear the counted-trial floor and still be unwinnable, because
-// the sign test only ever sees the discordant trials. Run 30611635547 reported
+// A record can clear the distinct-stimulus floor and still be unwinnable,
+// because the sign test only sees discordant stimulus votes. Run 30611635547 reported
 // five such evals as plain failures; `code-testing-agent` won its single
 // discordant trial (1W/4T/0L) and read as "not credible p=0.500 > 0.05", which
 // describes a measured null rather than a test that could not be run. The
@@ -623,8 +681,8 @@ test("records that miss 5% by the exact test do not pass", () => {
 // so this must NOT be relabelled `underpowered` — but the reason has to say that
 // no record could have passed.
 test("a tie-starved record says no record could have passed, not that none did", () => {
-  const v = gate([0.4, 0, 0, 0, 0]); // 1W/4T/0L over 5 counted trials
-  assert.equal(v.trialCount, 5, "clears the counted-trial floor");
+  const v = gate([0.4, 0, 0, 0, 0]); // 1W/4T/0L over 5 stimulus votes
+  assert.equal(v.stimulusVoteCount, 5, "clears the distinct-stimulus floor");
   assert.equal(v.underpowered, false, "not a spec-size problem: the trials exist");
   assert.equal(v.signTest.discordant, 1);
   assert.equal(v.passed, false);
@@ -714,7 +772,7 @@ test("each scenario carries its own record on the gate's basis", () => {
   // Two "slightly-better" wins and one "much-better" loss: magnitude-weighted
   // this scenario reads negative, but it contributes a positive net win, and a
   // renderer keyed on magnitude would point the opposite way to the verdict.
-  const report = reportFromScores([0.4, 0.4, -1.0, 0.4, 0.4, 0.4]);
+  const report = reportFromRepeatedScores([0.4, 0.4, -1.0, 0.4, 0.4, 0.4]);
   report.stimuli[0].meanScore = -0.06;
   const verdict = comparisonToVerdict(report, IDENTITY, EMPTY_ROLES, new Set());
   const scenario = verdict.scenarios[0];
@@ -777,10 +835,10 @@ test("signTestPValue is the exact one-sided binomial tail", () => {
 
 test("the credibility floor is the smallest count that can reach the alpha", () => {
   // Stated as the property that fixes the constant, so changing it needs a
-  // reason: 0.5^5 = 0.031 <= 0.05 < 0.0625 = 0.5^4, and discordant trials can
-  // never exceed counted trials.
-  assert.ok(signTestPValue(MIN_CREDIBLE_TRIALS, 0) <= SIGN_TEST_ALPHA);
-  assert.ok(signTestPValue(MIN_CREDIBLE_TRIALS - 1, 0) > SIGN_TEST_ALPHA);
+  // reason: 0.5^5 = 0.031 <= 0.05 < 0.0625 = 0.5^4, and discordant votes can
+  // never exceed counted stimulus votes.
+  assert.ok(signTestPValue(MIN_CREDIBLE_STIMULI, 0) <= SIGN_TEST_ALPHA);
+  assert.ok(signTestPValue(MIN_CREDIBLE_STIMULI - 1, 0) > SIGN_TEST_ALPHA);
 });
 
 test("the practical net-win floor rejects sparse wins among many ties", () => {
@@ -798,22 +856,28 @@ test("the practical net-win floor rejects sparse wins among many ties", () => {
   assert.equal(boundary.passed, true);
 });
 
-test("the practical floor preserves every possible pass through 24 trials", () => {
-  for (let trialCount = MIN_CREDIBLE_TRIALS; trialCount <= 24; trialCount++) {
-    for (let wins = 0; wins <= trialCount; wins++) {
-      for (let losses = 0; losses <= trialCount - wins; losses++) {
-        const ties = trialCount - wins - losses;
+test("the practical floor preserves every possible pass through its 25-vote boundary", () => {
+  for (let stimulusCount = MIN_CREDIBLE_STIMULI; stimulusCount <= 25; stimulusCount++) {
+    for (let wins = 0; wins <= stimulusCount; wins++) {
+      for (let losses = 0; losses <= stimulusCount - wins; losses++) {
+        const ties = stimulusCount - wins - losses;
         const statisticallyPassed =
           wins > losses && signTestPValue(wins, losses) <= SIGN_TEST_ALPHA;
         if (!statisticallyPassed) continue;
-        const netWin = (wins - losses) / trialCount;
+        const netWin = (wins - losses) / stimulusCount;
         assert.ok(
           netWin >= MIN_PRACTICAL_NET_WIN,
-          `${wins}W/${ties}T/${losses}L at n=${trialCount} would change`,
+          `${wins}W/${ties}T/${losses}L at n=${stimulusCount} would change`,
         );
       }
     }
   }
+
+  const firstExcluded = gate([...Array(5).fill(0.4), ...Array(21).fill(0)]);
+  assert.ok(firstExcluded.signTest.pValue <= SIGN_TEST_ALPHA);
+  assert.ok(firstExcluded.netWin < MIN_PRACTICAL_NET_WIN);
+  assert.equal(firstExcluded.practicalSignificance.passed, false);
+  assert.equal(firstExcluded.passed, false);
 });
 
 // --- CLI tokenizer ----------------------------------------------------------

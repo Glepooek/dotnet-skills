@@ -45,7 +45,8 @@ test("renders new states and reliability evidence without calling preference los
       conclusive: true,
       reason: "credible preference loss",
       recoveredErrors: [{ code: "judge_session_idle_timeout" }],
-      scenarioEvidence: { count: 1, wins: 0, ties: 0, losses: 1 },
+      scenarioEvidence: { gateEligible: true, count: 1, wins: 0, ties: 0, losses: 1 },
+      comparisonTrialEvidence: { gateEligible: false, count: 3, wins: 0, ties: 1, losses: 2 },
       scenarios: [],
     },
     {
@@ -69,7 +70,8 @@ test("renders new states and reliability evidence without calling preference los
   assert.match(markdown, /`VALID_NO_CHANGE` \(`preference_regression_report_only`\)/);
   assert.match(markdown, /`judge_organization_disabled`=2/);
   assert.match(markdown, /successful first-attempt judgments stayed fixed/);
-  assert.match(markdown, /Effective scenarios \(report only\):\*\* 1 \(0W\/0T\/1L\)/);
+  assert.match(markdown, /Gate evidence \(stimulus votes\):\*\* 1 \(0W\/0T\/1L\)/);
+  assert.match(markdown, /Repeated-run reliability \(not used by the gate\):\*\* 3 paired run\(s\) \(0W\/1T\/2L\)/);
 });
 
 test("renders legacy preference regressions as report-only", () => {

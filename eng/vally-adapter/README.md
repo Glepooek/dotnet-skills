@@ -42,13 +42,15 @@ result:
   that a skill regressed.
 - `underpowered` is a separate signal with the same "not evidence of a
   regression" property, but a different cause: the eval counted fewer than
-  `minCredibleTrials` trials, so no possible win/tie/loss record could have
+  `minCredibleStimuli` distinct stimulus votes, so no possible win/tie/loss record could have
   reached the sign test's 5% threshold. It is a property of the eval spec, not
-  of the run, and it is fixed by adding scenarios or raising `defaults.runs` —
-  never by changing the skill. See `eng/eval-quality/README.md`.
+  of the run, and it is fixed by adding independent, discriminating stimuli —
+  never by raising `defaults.runs` or changing the skill. See
+  `eng/eval-quality/README.md`.
 - `scenarioEvidence` collapses repeated runs for one stimulus into one effective
-  scenario vote. This is report-only (`gateEligible: false`) until the repository
-  selects a practical threshold and has enough independent scenarios.
+  stimulus vote. It is authoritative (`gateEligible: true`) for the sign test,
+  net-win floor, and verdict. `comparisonTrialEvidence` keeps the pooled run
+  outcomes as reliability-only evidence (`gateEligible: false`).
 - `completionTransitions` reports aggregate baseline/treatment pass transitions.
   Vally's aggregate pass can include LLM grading, so this signal is also
   report-only (`gateEligible: false`). `VALID_REGRESSION` must not be inferred
@@ -74,25 +76,55 @@ and treats a nonzero invocation with no report as a hard failure.
 ## Practical preference floor
 
 The sign test proves that the direction is unlikely under a 50/50 null, but
-ties are outside its sample. Without an effect-size floor, `5W/95T/0L` has
-`p=0.03125` and passes although the skilled arm improves only 5% of counted
-trials. A preference pass therefore requires both:
+ties are outside its sample. Without an effect-size floor, 100 distinct
+stimulus votes with `5W/95T/0L` have `p=0.03125` and pass although the skilled
+arm improves only 5% of tested tasks. A preference pass therefore requires both:
 
 ```text
 signTest.pValue <= 0.05
-abs((wins - losses) / countedTrials) >= 0.20
+abs((wins - losses) / stimulusVotes) >= 0.20
 ```
 
 The mirrored 20% floor applies to report-only preference regressions. The floor
 uses only win/tie/loss direction; judge magnitude cannot affect it. Exhaustive
-enumeration shows that every record which can pass the sign test at the
-repository's current maximum of 24 trials already clears 20%, so this rule
-protects future larger evals without changing a current possible pass.
+enumeration shows that every sign-test pass through 25 stimulus votes clears
+20%: `5W/20T/0L` is exactly 20%, and 26 votes is the first size where
+`5W/21T/0L` falls below it. The largest current eval has 17 distinct stimuli, so
+the floor does not remove any currently possible pass.
 
-`scenarioEvidence` remains the independence check in shadow mode. Repeated runs
-can stabilize one task, but they do not create new task samples. Moving the
-authoritative sign test to one vote per stimulus requires a separate eval-breadth
-migration because many current evals have fewer than five distinct stimuli.
+Repeated runs can stabilize one task, but they do not create new task samples.
+The adapter therefore gives each stimulus one majority-direction vote. For
+example, five stimuli run three times produce five gate votes, not 15. The
+pooled 15-run W/T/L remains visible under `comparisonTrialEvidence` so reliability
+changes are not hidden.
+
+## Policy provenance and power
+
+Vally defines a [stimulus as a test case](https://microsoft.github.io/vally/concepts/how-it-works/)
+and defines repeated runs as inputs to pass rate, pass@k, pass^k, and flakiness.
+Its [scoring guidance](https://microsoft.github.io/vally/concepts/scoring/)
+recommends three runs for CI and 5–10 for nightly evaluation. Those values
+measure within-stimulus reliability. Vally does not prescribe a number of
+distinct stimuli, a sign-test alpha, or a practical net-win floor.
+
+This repository uses a predeclared one-sided exact sign test at `alpha=0.05`
+for an improvement claim. The five-stimulus floor is derived from that policy:
+`0.5^4=0.0625` cannot pass, while `0.5^5=0.03125` can. It is only an eligibility
+floor. It is not 80% power. Under an idealized no-tie model, the exact number of
+discordant stimulus votes needed for at least 80% power is:
+
+| True conditional win probability | Votes needed |
+|---:|---:|
+| 0.60 | 158 |
+| 0.65 | 69 |
+| 0.70 | 37 |
+| 0.75 | 23 |
+| 0.80 | 18 |
+| 0.90 | 8 |
+
+These are planning values, not Vally requirements. Ties require more total
+stimuli because they do not enter the sign test. A non-pass is therefore not
+proof that the skill has no effect.
 
 ## Objective completion contract
 
@@ -109,8 +141,11 @@ Gate-eligible graders must be explicitly named in the eval, use a frozen
 repository allowlist of deterministic grader types, and have task-completion
 semantics. `kind: "code"` alone is not sufficient. LLM and human graders,
 aggregate scores, thresholds, and Vally's aggregate `gradeResult.passed` are
-prohibited. The adapter must read raw `gradeResult.details`, match grader
-instances by `(graderType, name)`, and pair arms by
+prohibited. The grader `type` must come from the trusted parsed eval spec or a
+generated sidecar; official Vally `GraderResult` records expose broad `kind`
+taxonomy, not the spec's `type`. The harness must prove that explicit unique
+grader identities round-trip to raw `gradeResult.details`, fail closed on any
+missing, duplicate, suffixed, mismatched, or errored result, and pair arms by
 `(stimulusName, trialIndex)`.
 
 A baseline-pass/treatment-fail pair is an objective regression candidate, not a
@@ -118,8 +153,9 @@ hard regression by itself because agent execution is still stochastic.
 `VALID_REGRESSION` requires conclusive predeclared paired confirmations, an
 exact one-sided test at `p <= 0.05`, an objective net-loss rate of at least 20%,
 and multiple-scenario correction when more than one completion scenario is
-tested. Until evals can declare these graders and Vally provides stable raw
-grader provenance, `completionTransitions.gateEligible` remains `false`.
+tested. Until evals can declare these graders and the harness proves a stable
+spec-to-result identity mapping, `completionTransitions.gateEligible` remains
+`false`.
 
 ## Correctness metrics
 
@@ -130,8 +166,9 @@ Track these metrics by model, judge, plugin, skill, and run:
 | Manifest completeness | `expectedEvalCount`, `writtenResultCount`, `unexpectedEvalCount` | Detect silent result loss or extra results |
 | Invalid-result rate and cause | `state`, `stateReason`, `errors[].code` | Keep infrastructure and eval-design failures out of skill verdicts |
 | Judge retry recovery | `comparisonAttempts`, `recoveredErrors[]`, `errors[]` | Measure transient judge failure and persistent failure separately |
-| Effective independent scenarios | `scenarioEvidence.count` and W/T/L | Show when repeated runs give trial volume without task breadth |
-| Preference effect and uncertainty | `netWin`, `signTest`, `practicalSignificance`, trial W/T/L | Require statistical and practical skilled-versus-baseline improvement |
+| Independent task evidence | `scenarioEvidence`, `stimulusVoteCount`, stimulus W/T/L | Gate on one vote per distinct stimulus |
+| Repeated-run reliability | `comparisonTrialEvidence`, `scenarios[].trials` | Show run volume, consistency, and flakiness without manufacturing task breadth |
+| Preference effect and uncertainty | `netWin`, `signTest`, `practicalSignificance` | Require statistical and practical skilled-versus-baseline improvement |
 | Completion transitions | `completionTransitions` | Diagnose possible completion changes without treating aggregate LLM grading as objective |
 | Cross-judge agreement | Explicit `state` plus `preferenceRegressed` | Measure judge robustness without conflating preference loss with objective regression |
 

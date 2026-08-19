@@ -902,7 +902,7 @@ jobs:
         run: |
           echo "## 🔬 Vally Evaluation Results: $ENTRY_NAME" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Skilled vs baseline, judged head-to-head by \`vally compare\`. A skill passes only on a complete comparison with a credible net win — more wins than losses, by an exact one-sided sign test at p ≤ 0.05 — over enough trials for any record to reach that bar. ⚠️ marks an invalid or inconclusive result. 📉 marks a report-only LLM preference loss, not an objective completion regression." >> $GITHUB_STEP_SUMMARY
+          echo "Skilled vs baseline, judged head-to-head by \`vally compare\`. Each distinct stimulus gives one gate vote; repeated runs report reliability only. A pass needs a complete comparison, an exact one-sided sign test at p ≤ 0.05, and at least a 20% net win. ⚠️ marks an invalid or inconclusive result. 📉 marks a report-only LLM preference loss, not an objective completion regression." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           RESULTS_DIR="artifacts/TestResults/vally/$ENTRY_NAME"
@@ -930,12 +930,10 @@ jobs:
             echo "$REASON" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
 
-            # Per-scenario table: net win (the basis the gate reads), the
-            # magnitude-weighted preference for triage, and win/tie/loss. The
-            # arrow follows the net win so a row can never point the opposite
-            # way to the verdict it feeds. adapt.mjs computes these per
-            # scenario; the fallback covers results.json written before it did.
-            echo "| Scenario | Net win | Δ Pref | Trials (W/T/L) |" >> $GITHUB_STEP_SUMMARY
+            # Per-scenario table: repeated-run direction, magnitude-weighted
+            # preference, and win/tie/loss. The adapter collapses each row to one
+            # majority-direction stimulus vote for the authoritative gate.
+            echo "| Scenario | Net win | Δ Pref | Runs (W/T/L) |" >> $GITHUB_STEP_SUMMARY
             echo "|----------|---------|--------|----------------|" >> $GITHUB_STEP_SUMMARY
             node -e "
               const r = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf-8'));

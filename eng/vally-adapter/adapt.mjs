@@ -16,8 +16,9 @@
  *      than differencing two independently-graded absolute scores. This drives
  *      the PR gate/comment: a skill passes only on a credible *net win* (more
  *      wins than losses by an exact one-sided sign test at 5%) over at least
- *      MIN_CREDIBLE_TRIALS trials. Below that floor the verdict is reported as
- *      underpowered rather than as a pass or a failure.
+ *      MIN_CREDIBLE_STIMULI distinct stimulus votes. Repeated runs measure
+ *      within-stimulus reliability and do not increase that sample. Below the
+ *      floor the verdict is reported as underpowered rather than as a failure.
  *   4. Emit a per-skill results.json that is a SUPERSET carrying BOTH:
  *        - the compare-based preference verdict (for gating + PR comment), and
  *        - absolute per-role dashboard fields (baseline / skilledIsolated /
@@ -145,15 +146,15 @@ Options:
 const SIGN_TEST_ALPHA = 0.05;
 
 // Statistical significance alone can approve a negligible effect when ties
-// dominate: 5W/95T/0L has p=0.031 but improves only 5% of counted trials. Keep
+// dominate: 5W/95T/0L has p=0.031 but improves only 5% of tested stimuli. Keep
 // the effect-size floor magnitude-free so stronger judge adjectives cannot
 // reintroduce the variance reversal fixed in dotnet/skills#952.
 const MIN_PRACTICAL_NET_WIN = 0.2;
 
-// Minimum counted trials behind a verdict. This is not a chosen constant: the
-// sign test cannot reach 5% on fewer than five discordant trials
+// Minimum distinct stimulus votes behind a verdict. This is not a chosen
+// constant: the sign test cannot reach 5% on fewer than five discordant votes
 // (0.5^4 = 0.0625 > 0.05 >= 0.031 = 0.5^5), and discordant trials can never
-// exceed counted trials — so at four or fewer, no possible record produces a
+// exceed stimulus votes — so at four or fewer, no possible record produces a
 // pass. Reporting those as "underpowered" rather than as a failure is what
 // stops "won every trial, failed anyway" from being rediagnosed every run.
 //
@@ -161,7 +162,7 @@ const MIN_PRACTICAL_NET_WIN = 0.2;
 // not a guarantee of adequate power for a realistic effect, which needs
 // considerably more. eng/eval-quality/check_eval_quality.py enforces the same
 // number against eval specs before they are ever run.
-const MIN_CREDIBLE_TRIALS = 5;
+const MIN_CREDIBLE_STIMULI = 5;
 
 const VERDICT_STATES = Object.freeze({
   VALID_PASS: "VALID_PASS",
@@ -809,41 +810,59 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
   const unmatchedTreatment = report.unmatchedTreatment ?? [];
   const unmatchedTrialCount = unmatchedBaseline.length + unmatchedTreatment.length;
 
-  // Every counted trial, as a direction. Errored trials are excluded from every
-  // statistic (matching compare's own `summarize`) so a flaky judge can't
-  // register as a run of genuine ties.
-  const directions = (report.stimuli ?? [])
+  // Raw paired trials remain authoritative for report-integrity checks, retry
+  // accounting, and within-stimulus reliability. They are not independent task
+  // samples, so repeated runs do not enter the cross-stimulus gate directly.
+  const trialDirections = (report.stimuli ?? [])
     .flatMap((st) => st.trials ?? [])
     .filter((t) => !t.errored)
     .map(trialDirection);
-  const wins = directions.filter((d) => d > 0).length;
-  const losses = directions.filter((d) => d < 0).length;
-  const ties = directions.length - wins - losses;
+  const trialWins = trialDirections.filter((d) => d > 0).length;
+  const trialLosses = trialDirections.filter((d) => d < 0).length;
+  const trialTies = trialDirections.length - trialWins - trialLosses;
 
-  // The gate reads the enumerated trials; the summary is what humans read. If
-  // they disagree, the report is malformed and neither can be trusted — that is
-  // a comparison that didn't complete, not a small eval, so it must not be
-  // routed to the contributor as "add more scenarios".
+  // The summary is what humans read. If it disagrees with the enumerated raw
+  // trials, neither representation can be trusted.
   const summaryAgrees =
-    directions.length === (s.trialCount ?? 0) &&
-    wins === (s.wins ?? 0) &&
-    ties === (s.ties ?? 0) &&
-    losses === (s.losses ?? 0);
+    trialDirections.length === (s.trialCount ?? 0) &&
+    trialWins === (s.wins ?? 0) &&
+    trialTies === (s.ties ?? 0) &&
+    trialLosses === (s.losses ?? 0);
   if (!summaryAgrees) {
     warn(
       `${identity.plugin}/${identity.skill}: compare summary reports ` +
         `${s.trialCount} trial(s) ${s.wins}W/${s.ties}T/${s.losses}L but stimuli[].trials shows ` +
-        `${directions.length} trial(s) ${wins}W/${ties}T/${losses}L — verdict marked inconclusive`,
+        `${trialDirections.length} trial(s) ${trialWins}W/${trialTies}T/${trialLosses}L — verdict marked inconclusive`,
     );
   }
 
   const conclusive = s.erroredCount === 0 && unmatchedTrialCount === 0 && summaryAgrees;
-  // Too few counted trials for any record to reach significance — see
-  // MIN_CREDIBLE_TRIALS. This is a property of the eval spec, not of the run, so
-  // it is only claimed when the comparison actually completed: a trial count
-  // depressed by errored, unmatched or unreadable trials is an infrastructure
-  // problem and is already reported as inconclusive.
-  const underpowered = conclusive && directions.length < MIN_CREDIBLE_TRIALS;
+
+  // Collapse repeated runs to one vote per stimulus. A stimulus votes in the
+  // direction supported by more of its successful runs; an even split or all
+  // ties contributes one stimulus-level tie.
+  const stimulusVotes = (report.stimuli ?? []).map((stimulus) => {
+    const counted = (stimulus.trials ?? []).filter((trial) => !trial.errored);
+    const stimulusWins = counted.filter((trial) => trialDirection(trial) > 0).length;
+    const stimulusLosses = counted.filter((trial) => trialDirection(trial) < 0).length;
+    return {
+      stimulusName: stimulus.stimulusName,
+      runCount: counted.length,
+      wins: stimulusWins,
+      ties: counted.length - stimulusWins - stimulusLosses,
+      losses: stimulusLosses,
+      direction: stimulusWins > stimulusLosses ? 1 : stimulusLosses > stimulusWins ? -1 : 0,
+    };
+  });
+  const directions = stimulusVotes.filter((vote) => vote.runCount > 0).map((vote) => vote.direction);
+  const wins = directions.filter((value) => value > 0).length;
+  const losses = directions.filter((value) => value < 0).length;
+  const ties = directions.length - wins - losses;
+
+  // Too few distinct stimulus votes for any record to reach significance is an
+  // eval-design problem. A stimulus count depressed by comparison errors or
+  // unmatched trajectories remains an infrastructure failure instead.
+  const underpowered = conclusive && directions.length < MIN_CREDIBLE_STIMULI;
 
   // The p-value is always the one-sided tail *in the direction the record
   // actually points*, so a reported p never describes the opposite hypothesis
@@ -867,6 +886,7 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
   for (const st of report.stimuli ?? []) {
     compareByStim.set(st.stimulusName, st);
   }
+  const voteByStim = new Map(stimulusVotes.map((vote) => [vote.stimulusName, vote]));
 
   const { baselineByStim, skilledByStim, pluginByStim, hasPlugin } = roles;
 
@@ -891,8 +911,9 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
     // scenario row can never point the opposite way to the verdict it feeds.
     // Computed once here rather than re-derived by each renderer.
     const counted = (st?.trials ?? []).filter((t) => !t.errored);
-    const sWins = counted.filter((t) => trialDirection(t) > 0).length;
-    const sLosses = counted.filter((t) => trialDirection(t) < 0).length;
+    const vote = voteByStim.get(name);
+    const sWins = vote?.wins ?? 0;
+    const sLosses = vote?.losses ?? 0;
 
     const scenario = {
       scenarioName: name,
@@ -931,35 +952,19 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
     return scenario;
   });
 
-  // Repeated runs measure within-stimulus reliability, not independent task
-  // breadth. This report-only statistic gives every stimulus one directional
-  // vote so consumers can see the effective cross-scenario evidence without
-  // changing the current trial-level gate.
-  const scenarioDirections = scenarios
-    .filter((scenario) => scenario.runCount > 0)
-    .map((scenario) => (scenario.direction === "better" ? 1 : scenario.direction === "worse" ? -1 : 0));
-  const scenarioWins = scenarioDirections.filter((value) => value > 0).length;
-  const scenarioLosses = scenarioDirections.filter((value) => value < 0).length;
-  const scenarioTies = scenarioDirections.length - scenarioWins - scenarioLosses;
-  const scenarioDirection =
-    scenarioWins > scenarioLosses ? "better" : scenarioLosses > scenarioWins ? "worse" : "none";
-  const scenarioPValue =
-    scenarioDirection === "worse"
-      ? signTestPValue(scenarioLosses, scenarioWins)
-      : signTestPValue(scenarioWins, scenarioLosses);
+  // This is the authoritative gate evidence. Raw repeated-run outcomes remain
+  // available in scenarios[].trials and comparisonTrialEvidence.
   const scenarioEvidence = {
-    gateEligible: false,
-    reason: "Report-only: repeated runs are collapsed to one directional vote per stimulus",
-    count: scenarioDirections.length,
-    wins: scenarioWins,
-    ties: scenarioTies,
-    losses: scenarioLosses,
-    discordant: scenarioWins + scenarioLosses,
-    direction: scenarioDirection,
-    netWin: scenarioDirections.length
-      ? (scenarioWins - scenarioLosses) / scenarioDirections.length
-      : 0,
-    pValue: scenarioPValue,
+    gateEligible: true,
+    reason: "Authoritative: repeated runs are collapsed to one directional vote per stimulus",
+    count: directions.length,
+    wins,
+    ties,
+    losses,
+    discordant: wins + losses,
+    direction,
+    netWin,
+    pValue,
     alpha: SIGN_TEST_ALPHA,
   };
 
@@ -990,9 +995,9 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
   }
 
   const sweep = directions.length > 0 && wins === directions.length;
-  // The sign test conditions on the discordant (non-tie) trials, so this — not
-  // the counted trial count — is what decides whether any record could have
-  // reached alpha. An eval can clear MIN_CREDIBLE_TRIALS on counted trials and
+  // The sign test conditions on discordant (non-tie) stimulus votes, so this —
+  // not the total stimulus-vote count — decides whether any record could have
+  // reached alpha. An eval can clear MIN_CREDIBLE_STIMULI on stimulus votes and
   // still be unwinnable once ties are removed, which is the case the plain
   // "not credible (p > alpha)" wording used to misdescribe as a measured null.
   const discordant = wins + losses;
@@ -1006,9 +1011,9 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
             `${s.wins}W/${s.ties}T/${s.losses}L, trials show ${directions.length} ` +
             `${wins}W/${ties}T/${losses}L)`
           : underpowered
-            ? `underpowered (${directions.length} counted trial(s); a credible verdict needs at ` +
-              `least ${MIN_CREDIBLE_TRIALS}${sweep ? ", and this eval won every one of them" : ""}) — ` +
-              `raise the eval's trial count with more scenarios or defaults.runs`
+            ? `underpowered (${directions.length} counted stimulus vote(s); a credible verdict needs at ` +
+              `least ${MIN_CREDIBLE_STIMULI}${sweep ? ", and this eval won every one of them" : ""}) — ` +
+              `add distinct, discriminating stimuli; repeated runs do not increase task breadth`
             : credible && direction !== "none" && !practicallyMeaningful
             ? `statistically credible ${direction === "better" ? "improvement" : "preference loss"}, ` +
               `but |net win| ${pct(Math.abs(netWin))} is below the practical floor ` +
@@ -1019,20 +1024,21 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
                 ? "credibly worse"
                 : wins <= losses
                   ? "no improvement"
-                  : discordant < MIN_CREDIBLE_TRIALS
+                  : discordant < MIN_CREDIBLE_STIMULI
                     ? `not credible — ${ties} of ${directions.length} trial(s) tied, leaving only ` +
                       `${discordant} discordant trial(s). The sign test conditions on non-tie ` +
-                      `trials and cannot reach ${SIGN_TEST_ALPHA} below ${MIN_CREDIBLE_TRIALS}, so ` +
+                      `stimulus votes and cannot reach ${SIGN_TEST_ALPHA} below ${MIN_CREDIBLE_STIMULI}, so ` +
                       `no record could have passed here — this is not a measured null. Either the ` +
                       `skill is inert on these scenarios (make them discriminate) or the eval ` +
-                      `needs more trials to clear the ties (more scenarios or defaults.runs)`
+                      `needs more distinct stimuli to clear the ties`
                     : `not credible (sign test p=${pValue.toFixed(3)} > ${SIGN_TEST_ALPHA})`;
 
   const reason =
     `Net win ${netWin >= 0 ? "+" : ""}${pct(netWin)} ` +
-    `(${wins}W/${ties}T/${losses}L over ${directions.length} trial(s), ` +
+    `(${wins}W/${ties}T/${losses}L over ${directions.length} stimulus vote(s), ` +
     `sign test p=${pValue.toFixed(3)}), ` +
     `mean preference ${s.meanScore >= 0 ? "+" : ""}${pct(s.meanScore)}` +
+    ` across ${trialDirections.length} paired run(s)` +
     `${s.erroredCount ? `, ${s.erroredCount} errored` : ""}` +
     `${unmatchedTrialCount ? `, ${unmatchedTrialCount} unmatched` : ""} — ${credibility}`;
 
@@ -1100,7 +1106,9 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
     stateReason,
     conclusive,
     underpowered,
-    minCredibleTrials: MIN_CREDIBLE_TRIALS,
+    minCredibleStimuli: MIN_CREDIBLE_STIMULI,
+    // Compatibility alias retained for schema-version-2 consumers.
+    minCredibleTrials: MIN_CREDIBLE_STIMULI,
     practicalSignificance: {
       netWin: Math.abs(netWin),
       minimum: MIN_PRACTICAL_NET_WIN,
@@ -1109,8 +1117,8 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
     passed,
     regressed,
     preferenceRegressed: regressed,
-    // The deciding statistic: (wins - losses) / trials as the effect size, and
-    // an exact one-sided sign test over the discordant trials as its
+    // The deciding statistic: one vote per distinct stimulus, with repeated
+    // runs collapsed before the exact one-sided sign test.
     // credibility. Magnitude-free, so it cannot reverse when the judge upgrades
     // a win from "slightly-better" to "much-better".
     netWin,
@@ -1128,11 +1136,22 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
     // Vally's magnitude-weighted preference, reported for triage. NOT the gate.
     meanScore: s.meanScore,
     confidenceInterval: { low: s.ciLow, high: s.ciHigh, level: 0.95 },
-    winRate: s.winRate,
-    wins: s.wins,
-    ties: s.ties,
-    losses: s.losses,
-    trialCount: s.trialCount,
+    winRate: directions.length ? wins / directions.length : 0,
+    wins,
+    ties,
+    losses,
+    stimulusVoteCount: directions.length,
+    // Compatibility alias retained for schema-version-2 consumers.
+    trialCount: directions.length,
+    comparisonTrialEvidence: {
+      gateEligible: false,
+      reason: "Reliability only: repeated runs are not independent task samples",
+      count: trialDirections.length,
+      wins: trialWins,
+      ties: trialTies,
+      losses: trialLosses,
+      winRate: s.winRate,
+    },
     erroredCount: s.erroredCount,
     unmatchedTrialCount,
     unmatchedBaseline,
@@ -1145,7 +1164,7 @@ function comparisonToVerdict(report, identity, roles, nonActivationStims) {
       attempts: 1,
       retriedSlots: 0,
       recoveredSlots: 0,
-      frozenSuccesses: directions.length,
+      frozenSuccesses: trialDirections.length,
       recoveredErrors: [],
       persistentErrors: [],
     },
@@ -1193,7 +1212,8 @@ function invalidVerdict(identity, cause, message, accounting = {}) {
     stateReason: { code: cause.code, phase: cause.phase },
     conclusive: false,
     underpowered: false,
-    minCredibleTrials: MIN_CREDIBLE_TRIALS,
+    minCredibleStimuli: MIN_CREDIBLE_STIMULI,
+    minCredibleTrials: MIN_CREDIBLE_STIMULI,
     passed: false,
     regressed: false,
     preferenceRegressed: false,
@@ -1243,7 +1263,17 @@ function invalidVerdict(identity, cause, message, accounting = {}) {
     wins: 0,
     ties: 0,
     losses: 0,
+    stimulusVoteCount: 0,
     trialCount: 0,
+    comparisonTrialEvidence: {
+      gateEligible: false,
+      reason: "No complete comparison was available",
+      count: 0,
+      wins: 0,
+      ties: 0,
+      losses: 0,
+      winRate: 0,
+    },
     erroredCount: 0,
     unmatchedTrialCount: 0,
     unmatchedBaseline: [],
@@ -1260,7 +1290,7 @@ function invalidVerdict(identity, cause, message, accounting = {}) {
 
 function writeVerdictResults(outputRoot, evalFile, identity, verdict, expectedEval) {
   const results = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     evalFile,
     model: opts.model,
     judgeModel: opts["judge-model"],
@@ -1553,7 +1583,7 @@ export {
   mergeComparisonReports,
   loadExpectedEvalFiles,
   VERDICT_STATES,
-  MIN_CREDIBLE_TRIALS,
+  MIN_CREDIBLE_STIMULI,
   MIN_PRACTICAL_NET_WIN,
   SIGN_TEST_ALPHA,
 };
