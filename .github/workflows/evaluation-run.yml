@@ -520,6 +520,10 @@ jobs:
             rm -rf "$PROBE_HOME"
             PROBE_HOME=$(mktemp -d)
             for probe_model in "${PROBE_MODELS[@]}"; do
+              # Probe with reasoning effort first, then retry once without it
+              # when the selected model reports that the option is unsupported.
+              # Capability detection covers Haiku and future models without a
+              # hard-coded model list.
               effort_args=(--effort=low)
               while true; do
                 set +e
