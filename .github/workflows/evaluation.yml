@@ -821,9 +821,9 @@ jobs:
           $entries = @()
           $plugins = @()
 
-          # Build matrix entries for a full-plugin evaluation, sharding the
-          # plugin's skills by the optional `executionShard:` top-level tag
-          # in tests/<plugin>/<skill>/eval.yaml. Untagged skills fall into a
+          # Build matrix entries for a full-plugin evaluation, sharding skills
+          # that have eval specs by the optional `executionShard:` top-level tag
+          # in tests/<plugin>/<skill>/eval.yaml. Untagged evals fall into a
           # synthetic "default" bucket. Plugins with all skills in one bucket
           # produce a single entry (unchanged behavior); plugins with multiple
           # buckets fan out into one matrix entry per shard so each shard
@@ -841,8 +841,7 @@ jobs:
             $skillsRoot = Join-Path $contentRoot $skillsDir
             $singleEntry = @{ name = $plugin; plugin = $plugin; skills_path = $skillsDir }
             if (-not (Test-Path $skillsRoot)) {
-              if ($selectedSkills.Count -gt 0) { return @() }
-              return @($singleEntry)
+              return @()
             }
             $skillDirs = @(Get-ChildItem -Path $skillsRoot -Directory -ErrorAction SilentlyContinue |
               Sort-Object Name | Select-Object -ExpandProperty Name)
@@ -852,27 +851,28 @@ jobs:
               $skillDirs = @($skillDirs | Where-Object { $selected.ContainsKey($_) })
             }
             if ($skillDirs.Count -eq 0) {
-              if ($selectedSkills.Count -gt 0) { return @() }
-              return @($singleEntry)
+              return @()
             }
             $shardGroups = @{}
+            $evalSkills = @()
             foreach ($skill in $skillDirs) {
               $evalPath = Join-Path $contentRoot "tests" $plugin $skill "eval.yaml"
+              if (-not (Test-Path $evalPath)) { continue }
+              $evalSkills += $skill
               $shard = "default"
-              if (Test-Path $evalPath) {
-                # Allow optional leading whitespace so an accidentally indented
-                # executionShard: key still groups correctly (rather than silently
-                # collapsing back to the default bucket).
-                $m = Select-String -Path $evalPath -Pattern '^\s*executionShard:\s*[\x27"]?([\w.\-]+)' -List
-                if ($m) { $shard = $m.Matches[0].Groups[1].Value }
-              }
+              # Allow optional leading whitespace so an accidentally indented
+              # executionShard: key still groups correctly (rather than silently
+              # collapsing back to the default bucket).
+              $m = Select-String -Path $evalPath -Pattern '^\s*executionShard:\s*[\x27"]?([\w.\-]+)' -List
+              if ($m) { $shard = $m.Matches[0].Groups[1].Value }
               if (-not $shardGroups.ContainsKey($shard)) { $shardGroups[$shard] = @() }
               $shardGroups[$shard] += $skill
             }
+            if ($shardGroups.Count -eq 0) { return @() }
             if ($shardGroups.Count -le 1) {
               if ($selectedSkills.Count -gt 0) {
-                $paths = ($skillDirs | ForEach-Object { "$skillsDir/$_" }) -join ' '
-                $name = if ($skillDirs.Count -eq 1) { "$plugin--$($skillDirs[0])" } else { $plugin }
+                $paths = ($evalSkills | ForEach-Object { "$skillsDir/$_" }) -join ' '
+                $name = if ($evalSkills.Count -eq 1) { "$plugin--$($evalSkills[0])" } else { $plugin }
                 return @(@{ name = $name; plugin = $plugin; skills_path = $paths })
               }
               return @($singleEntry)
@@ -964,8 +964,6 @@ jobs:
                 $plugin = $_
                 Get-PluginShardEntries -plugin $plugin -contentRoot $contentRoot -selectedSkills ($changedSkillsByPlugin[$plugin] | Sort-Object -Unique)
               })
-
-              $plugins = @($entries | ForEach-Object { $_.plugin } | Sort-Object -Unique)
             }
 
             git worktree remove /tmp/pr-content --force 2>$null
@@ -998,6 +996,9 @@ jobs:
             }
             $entries = @($plugins | ForEach-Object { Get-PluginShardEntries -plugin $_ })
           }
+          # Only plugins represented by a non-empty eval entry are downstream
+          # publication targets.
+          $plugins = @($entries | ForEach-Object { $_.plugin } | Sort-Object -Unique)
 
           # ---- Cross-family model dimension (IMPACT-ANALYSIS.md §10) ----------
           # Resolve a matrix profile, then expand each plugin/shard entry across
@@ -1254,7 +1255,6 @@ jobs:
     needs: [gate, discover, evaluate, publish-session-data]
     if: >-
       always() &&
-      needs.evaluate.result != 'cancelled' &&
       needs.gate.outputs.is_fork != 'true' &&
       needs.gate.outputs.pr_number != '' &&
       needs.discover.outputs.has_entries == 'true'
@@ -1280,15 +1280,46 @@ jobs:
         continue-on-error: ${{ needs.evaluate.result != 'success' }}
 
       - name: Consolidate and post results
+        if: always()
         continue-on-error: true
         env:
+          EVALUATE_RESULT: ${{ needs.evaluate.result }}
+          EXPECTED_ENTRIES: ${{ needs.discover.outputs.entries }}
           GH_TOKEN: ${{ github.token }}
         run: |
           PR_NUMBER=${{ needs.gate.outputs.pr_number }}
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-          # If results exist, consolidate them into a summary comment
+          mkdir -p all-results
           JSON_FILES=$(find all-results/ -name results.json 2>/dev/null || true)
+          EXPECTED_LEG_COUNT=$(printf '%s' "$EXPECTED_ENTRIES" | jq -e 'if type == "array" then length else error("expected matrix entries must be an array") end')
+          OBSERVED_LEG_COUNT=$(find all-results/ -name adapter-summary.json -type f 2>/dev/null | wc -l | tr -d ' ')
+          # Per-leg adapter summaries prove completeness only inside artifacts
+          # that exist. Never turn a surviving subset into a matrix-wide verdict.
+          if [[ "$EVALUATE_RESULT" != "success" || "$OBSERVED_LEG_COUNT" -ne "$EXPECTED_LEG_COUNT" ]]; then
+            if [[ "$EVALUATE_RESULT" == "skipped" ]]; then
+              BODY="❌ Evaluation did not complete (an upstream job failed or was skipped, so evaluation never ran). [View workflow run](${RUN_URL})"
+            elif [[ "$EVALUATE_RESULT" == "success" ]]; then
+              BODY=$(printf '❌ Evaluation result artifacts are incomplete: expected %s matrix leg artifact(s), but found %s. Check the [workflow run](%s) artifact upload and download logs, then comment `/evaluate %s` to retry this exact commit.' "$EXPECTED_LEG_COUNT" "$OBSERVED_LEG_COUNT" "$RUN_URL" "${{ needs.gate.outputs.head_sha }}")
+            else
+              BODY=$(printf '❌ Evaluation did not complete successfully (the evaluate job reported `%s`). Check the [workflow run](%s) logs, then comment `/evaluate %s` to retry this exact commit.' "$EVALUATE_RESULT" "$RUN_URL" "${{ needs.gate.outputs.head_sha }}")
+            fi
+
+            if [ -n "$JSON_FILES" ]; then
+              PARTIAL_COUNT=$(printf '%s\n' "$JSON_FILES" | sed '/^$/d' | wc -l | tr -d ' ')
+              BODY=$(printf '%s\n\n%s partial result file(s) were preserved for diagnosis but were not consolidated because the full matrix did not complete.' "$BODY" "$PARTIAL_COUNT")
+            fi
+
+            {
+              echo "## ❌ Evaluation incomplete"
+              echo ""
+              printf '%s\n' "$BODY"
+            } >> "$GITHUB_STEP_SUMMARY"
+            gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" -X POST -f body="$BODY"
+            exit 0
+          fi
+
+          # Only a successful full matrix may be consolidated into verdicts.
           if [ -n "$JSON_FILES" ]; then
             # Full metrics for the step summary and a decision-first repair view
             # for the PR comment. Both bind the report to the evaluated commit.
@@ -1344,20 +1375,9 @@ jobs:
             gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
               -X POST -F "body=@consolidated-comment.md"
           else
-            # No results.json anywhere. Three distinct causes:
-            if [[ "${{ needs.evaluate.result }}" == "skipped" ]]; then
-              # The evaluate job never ran (an upstream job failed or was skipped).
-              BODY="❌ Evaluation did not complete (an upstream job failed or was skipped, so evaluation never ran). [View workflow run](${RUN_URL})"
-            elif [[ "${{ needs.evaluate.result }}" != "success" ]]; then
-              # The evaluate job failed or was cancelled — it did not complete successfully.
-              BODY=$(printf '❌ Evaluation did not complete successfully (the evaluate job reported `%s`). Check the [workflow run](%s) logs, then comment `/evaluate %s` to retry this exact commit.' "${{ needs.evaluate.result }}" "${RUN_URL}" "${{ needs.gate.outputs.head_sha }}")
-            else
-              # The evaluate job completed but produced zero verdicts — most often a
-              # transient LLM-session auth failure ("Session was not created with
-              # authentication info or custom provider") rather than a skill regression.
-              BODY=$(printf '❌ Evaluation ran but produced no results.\n\nThe evaluate job completed but no `results.json` verdicts were generated. This is usually a **transient infrastructure failure** — commonly an LLM-session auth error (`Session was not created with authentication info or custom provider`) — not a problem with your skill. Check the [workflow run](%s) logs, then comment `/evaluate %s` to retry this exact commit.' "${RUN_URL}" "${{ needs.gate.outputs.head_sha }}")
-            fi
-
+            # A successful matrix with zero verdicts is an infrastructure fault,
+            # not evidence about skill quality.
+            BODY=$(printf '❌ Evaluation ran but produced no results.\n\nThe evaluate job completed but no `results.json` verdicts were generated. This is usually a **transient infrastructure failure** — commonly an LLM-session auth error (`Session was not created with authentication info or custom provider`) — not a problem with your skill. Check the [workflow run](%s) logs, then comment `/evaluate %s` to retry this exact commit.' "${RUN_URL}" "${{ needs.gate.outputs.head_sha }}")
             gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" -X POST -f body="$BODY"
           fi
 

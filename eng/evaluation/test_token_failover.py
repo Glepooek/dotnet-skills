@@ -468,9 +468,10 @@ esac
 
     def test_pr_report_binds_identity_and_reruns_to_exact_commit(self) -> None:
         workflow = yaml.safe_load(CALLER_WORKFLOW.read_text(encoding="utf-8"))
+        comment_job = workflow["jobs"]["comment-on-pr"]
         steps = {
             step.get("name"): step
-            for step in workflow["jobs"]["comment-on-pr"]["steps"]
+            for step in comment_job["steps"]
         }
         script = steps["Consolidate and post results"]["run"]
 
@@ -489,6 +490,74 @@ esac
             script,
         )
         self.assertNotIn("re-post `/evaluate`", script)
+
+    def test_partial_matrix_results_never_become_complete_verdicts(self) -> None:
+        caller = yaml.safe_load(CALLER_WORKFLOW.read_text(encoding="utf-8"))
+        comment_job = caller["jobs"]["comment-on-pr"]
+        self.assertNotIn(
+            "needs.evaluate.result != 'cancelled'",
+            comment_job["if"],
+        )
+
+        comment_steps = {
+            step.get("name"): step for step in comment_job["steps"]
+        }
+        consolidate_step = comment_steps["Consolidate and post results"]
+        self.assertEqual(consolidate_step["if"], "always()")
+        self.assertEqual(
+            consolidate_step["env"]["EXPECTED_ENTRIES"],
+            "${{ needs.discover.outputs.entries }}",
+        )
+        script = consolidate_step["run"]
+        incomplete_guard = (
+            'if [[ "$EVALUATE_RESULT" != "success" '
+            '|| "$OBSERVED_LEG_COUNT" -ne "$EXPECTED_LEG_COUNT" ]]'
+        )
+        guard_index = script.index(incomplete_guard)
+        consolidation_index = script.index(
+            "node eng/vally-adapter/consolidate.mjs"
+        )
+        self.assertLess(guard_index, consolidation_index)
+        self.assertIn(
+            "were preserved for diagnosis but were not consolidated",
+            script[guard_index:consolidation_index],
+        )
+        self.assertIn(
+            "exit 0",
+            script[guard_index:consolidation_index],
+        )
+        self.assertIn(
+            "find all-results/ -name adapter-summary.json",
+            script[:guard_index],
+        )
+        self.assertIn(
+            "expected %s matrix leg artifact(s), but found %s",
+            script[guard_index:consolidation_index],
+        )
+
+        discover_script = next(
+            step["run"]
+            for step in caller["jobs"]["discover"]["steps"]
+            if "function Get-PluginShardEntries" in step.get("run", "")
+        )
+        self.assertIn(
+            'if (-not (Test-Path $evalPath)) { continue }',
+            discover_script,
+        )
+        self.assertIn(
+            'if ($shardGroups.Count -eq 0) { return @() }',
+            discover_script,
+        )
+
+        runner = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        runner_steps = {
+            step.get("name"): step
+            for step in runner["jobs"]["vally-evaluate"]["steps"]
+        }
+        self.assertEqual(
+            runner_steps["Upload results"]["with"]["if-no-files-found"],
+            "error",
+        )
 
     def test_fork_checkout_is_blocked_and_adapter_code_is_trusted(self) -> None:
         workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))

@@ -880,6 +880,7 @@ jobs:
           name: vally-results-${{ matrix.entry.name }}
           path: artifacts/TestResults/vally/${{ matrix.entry.name }}/
           include-hidden-files: true
+          if-no-files-found: error
           retention-days: 14
 
       - name: Upload cross-family second-judge results

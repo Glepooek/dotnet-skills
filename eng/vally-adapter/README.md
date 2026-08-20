@@ -162,7 +162,13 @@ collector to distinguish:
 - a malformed or invalid result.
 
 The run fails closed unless expected, observed, and written identities match
-exactly.
+exactly. This proof applies inside each matrix leg. Discovery omits entries with
+no eval specs. The PR collector separately requires the full reusable matrix to
+succeed and requires one downloaded `adapter-summary.json` per declared matrix
+entry before it renders any verdict. Partial artifacts remain available for
+diagnosis, but they are labeled incomplete and are never consolidated into
+quality evidence. A leg that found evals also fails if its primary result
+artifact is missing.
 
 ### 3. Run three Vally variants
 
@@ -241,6 +247,20 @@ The statistical test and practical floor answer different questions:
 
 Example: `5W / 95T / 0L` has `p = 0.03125`, but its net win is only 5%. It is
 statistically significant and practically sparse, so it does not pass.
+
+The 20% floor does not make small or niche instruments harder to pass. For
+every instrument from 5 through 25 stimuli, any record that can pass the exact
+sign test already has a net win of at least 20%. The first record changed by the
+floor is `5W / 21T / 0L` at 26 stimuli: `p = 0.03125`, but net win is only
+`5 / 26 = 19.2%`. `adapt.test.mjs` exhaustively checks this boundary.
+
+Per-eval overrides are intentionally unsupported. An override would matter
+only for a larger instrument with a statistically credible but sparse effect,
+which is the exact false-positive class the floor prevents. It would also let
+authors tune a threshold after seeing results. If repository evidence later
+shows that 20% is wrong, change the versioned repository policy with a
+predeclared rationale and apply it consistently; do not create result-specific
+exceptions.
 
 ```mermaid
 flowchart TD
