@@ -491,8 +491,8 @@ if (verdicts.length === 0) {
   lines.push(`|${header.map(() => "---").join("|")}|`);
   for (const verdict of verdicts) {
     const common = [
-      verdict.skillName,
-      verdict.model,
+      html(verdict.skillName),
+      html(verdict.model),
       resultLabel(verdict),
       gateEvidence(verdict),
     ];

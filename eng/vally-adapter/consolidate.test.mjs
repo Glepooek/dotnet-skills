@@ -183,8 +183,8 @@ test("preserves execution model identity and aggregates measurement health", () 
 test("escapes table identity cells exactly once", () => {
   const markdown = render([
     {
-      skillName: "skill|name\nnext",
-      model: "model|name\nvariant",
+      skillName: "skill<T> & name|next\nline",
+      model: "model<U> & name|next\nline",
       state: "VALID_PASS",
       passed: true,
       conclusive: true,
@@ -192,9 +192,16 @@ test("escapes table identity cells exactly once", () => {
     },
   ]);
 
-  assert.ok(markdown.includes("| skill\\|name next | model\\|name variant |"));
-  assert.equal(markdown.includes("skill\\\\|name"), false);
-  assert.equal(markdown.includes("model\\\\|name"), false);
+  assert.ok(
+    markdown.includes(
+      "| skill&lt;T&gt; &amp; name\\|next line | model&lt;U&gt; &amp; name\\|next line |",
+    ),
+  );
+  assert.equal(markdown.includes("skill<T>"), false);
+  assert.equal(markdown.includes("model<U>"), false);
+  assert.equal(markdown.includes("&amp;lt;"), false);
+  assert.equal(markdown.includes("&amp;amp;"), false);
+  assert.equal(markdown.includes("name\\\\|next"), false);
 });
 
 test("escapes scenario names in markdown tables exactly once", () => {
