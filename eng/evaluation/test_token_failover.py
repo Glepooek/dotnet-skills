@@ -510,7 +510,8 @@ esac
         )
         script = consolidate_step["run"]
         incomplete_guard = (
-            'if [[ "$EVALUATE_RESULT" != "success" '
+            'if [[ "$MATRIX_MANIFEST_VALID" != "true" '
+            '|| "$EVALUATE_RESULT" != "success" '
             '|| "$OBSERVED_LEG_COUNT" -ne "$EXPECTED_LEG_COUNT" ]]'
         )
         guard_index = script.index(incomplete_guard)
@@ -529,6 +530,14 @@ esac
         self.assertIn(
             "find all-results/ -name adapter-summary.json",
             script[:guard_index],
+        )
+        self.assertIn(
+            "if ! EXPECTED_LEG_COUNT=$(printf",
+            script[:guard_index],
+        )
+        self.assertIn(
+            "the discovered entry list was missing, malformed, or not a JSON array",
+            script[guard_index:consolidation_index],
         )
         self.assertIn(
             "expected %s matrix leg artifact(s), but found %s",
@@ -678,6 +687,8 @@ esac
         )
         self.assertIn("s.expectedManifestProvided === true", run_script)
         self.assertIn("s.unexpectedEvalCount === 0", run_script)
+        self.assertIn("s.measurementInvalidEvalCount === 0", run_script)
+        self.assertNotIn("s.invalidEvalCount === 0", run_script)
         self.assertIn(
             "Vally comparison watchdog expired after 45 minutes",
             run_script,

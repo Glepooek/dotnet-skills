@@ -197,6 +197,36 @@ test("escapes table identity cells exactly once", () => {
   assert.equal(markdown.includes("model\\\\|name"), false);
 });
 
+test("escapes scenario names in markdown tables exactly once", () => {
+  const markdown = render(
+    [
+      {
+        skillName: "scenario-escaping",
+        state: "VALID_NO_CHANGE",
+        passed: false,
+        conclusive: true,
+        reason: "not proven improved",
+        scenarios: [
+          {
+            scenarioName: "List<T> & map|next\nline",
+            netWin: 0,
+            meanScore: 0,
+            wins: 0,
+            ties: 1,
+            losses: 0,
+          },
+        ],
+      },
+    ],
+    { format: "full" },
+  );
+
+  assert.ok(markdown.includes("| = List&lt;T&gt; &amp; map\\|next line |"));
+  assert.equal(markdown.includes("List<T>"), false);
+  assert.equal(markdown.includes("&amp;lt;"), false);
+  assert.equal(markdown.includes("&amp;amp;"), false);
+});
+
 test("keeps Overfit visible and gives actionable evidence for a non-pass", () => {
   const markdown = render([
     {

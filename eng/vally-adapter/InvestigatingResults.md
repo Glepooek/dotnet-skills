@@ -126,9 +126,14 @@ Each scenario merges the compare preference for that stimulus with the absolute 
 
 `adapter-summary.json` is the result-set accounting record. It contains
 `expectedEvalCount`, `observedEvalCount`, `writtenResultCount`, `missingEvals`,
-`unexpectedEvals`, and `invalidEvals`. The workflow also checks that the number
-of primary result files equals the exact pre-run manifest count. A missing eval
-cannot disappear while unrelated results make the job look complete.
+`unexpectedEvals`, `invalidEvals`, and `measurementInvalidEvals`.
+`measurementInvalidEvals` is the fail-closed subset: missing baseline or skilled
+records, unresolved judge or pairing failures, malformed reports, and other
+adapter failures. It excludes only the explicit `underpowered` eval-design
+state. The workflow requires this list to be empty and also checks that the
+number of primary result files equals the exact pre-run manifest count. A
+missing or invalid measurement cannot disappear while unrelated results make
+the job look complete.
 
 ## Reaching the raw Vally output
 

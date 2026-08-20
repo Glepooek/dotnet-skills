@@ -244,7 +244,7 @@ function scenarioTable(verdict, weakOnly = false) {
     const icon = netWin > 0 ? "▲" : netWin < 0 ? "▼" : "=";
     const magnitude = typeof scenario.meanScore === "number" ? scenario.meanScore : 0;
     rows.push(
-      `| ${icon} ${td(scenario.scenarioName)} | ${pct(netWin)} | ${pct(magnitude)} | ${wins}/${ties}/${losses} |`,
+      `| ${icon} ${td(html(scenario.scenarioName))} | ${pct(netWin)} | ${pct(magnitude)} | ${wins}/${ties}/${losses} |`,
     );
   }
   return rows;

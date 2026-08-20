@@ -1426,7 +1426,16 @@ function main() {
   let written = 0;
   let incomplete = 0;
   const invalidEvals = [];
+  const measurementInvalidEvals = [];
   const unexpectedEvals = [];
+  const recordInvalidEval = (evalFile, verdict) => {
+    invalidEvals.push(evalFile);
+    // Underpowered instruments are tracked separately as design debt. Every
+    // other invalid state is measurement failure and must fail the matrix leg.
+    if (verdict.stateReason?.code !== "underpowered") {
+      measurementInvalidEvals.push(evalFile);
+    }
+  };
   try {
     for (const evalFile of allEvals) {
       const { skill, plugin, skillPath } = evalIdentity(evalFile);
@@ -1450,7 +1459,7 @@ function main() {
         );
         const outputPath = writeVerdictResults(outputRoot, evalFile, identity, verdict, expectedEval);
         console.log(`\n${verdictSummaryLine(verdict)}\n  → ${outputPath}`);
-        invalidEvals.push(evalFile);
+        recordInvalidEval(evalFile, verdict);
         written++;
         incomplete++;
         continue;
@@ -1466,7 +1475,7 @@ function main() {
         );
         const outputPath = writeVerdictResults(outputRoot, evalFile, identity, verdict, expectedEval);
         console.log(`\n${verdictSummaryLine(verdict)}\n  → ${outputPath}`);
-        invalidEvals.push(evalFile);
+        recordInvalidEval(evalFile, verdict);
         written++;
         incomplete++;
         continue;
@@ -1482,7 +1491,7 @@ function main() {
         );
         const outputPath = writeVerdictResults(outputRoot, evalFile, identity, verdict, expectedEval);
         console.log(`\n${verdictSummaryLine(verdict)}\n  → ${outputPath}`);
-        invalidEvals.push(evalFile);
+        recordInvalidEval(evalFile, verdict);
         written++;
         incomplete++;
         continue;
@@ -1509,7 +1518,7 @@ function main() {
         );
         const outputPath = writeVerdictResults(outputRoot, evalFile, identity, verdict, expectedEval);
         console.log(`\n${verdictSummaryLine(verdict)}\n  → ${outputPath}`);
-        invalidEvals.push(evalFile);
+        recordInvalidEval(evalFile, verdict);
         written++;
         incomplete++;
         continue;
@@ -1525,7 +1534,7 @@ function main() {
         );
         const outputPath = writeVerdictResults(outputRoot, evalFile, identity, verdict, expectedEval);
         console.log(`\n${verdictSummaryLine(verdict)}\n  → ${outputPath}`);
-        invalidEvals.push(evalFile);
+        recordInvalidEval(evalFile, verdict);
         written++;
         incomplete++;
         continue;
@@ -1570,7 +1579,7 @@ function main() {
         );
         const outputPath = writeVerdictResults(outputRoot, evalFile, identity, verdict, expectedEval);
         console.log(`\n${verdictSummaryLine(verdict)}\n  → ${outputPath}`);
-        invalidEvals.push(evalFile);
+        recordInvalidEval(evalFile, verdict);
         written++;
         incomplete++;
         continue;
@@ -1598,7 +1607,7 @@ function main() {
       const outputPath = writeVerdictResults(outputRoot, evalFile, identity, verdict, expectedEval);
       written++;
       if (verdict.state === VERDICT_STATES.INVALID_INCONCLUSIVE) {
-        invalidEvals.push(evalFile);
+        recordInvalidEval(evalFile, verdict);
         incomplete++;
       }
 
@@ -1622,8 +1631,10 @@ function main() {
         missingEvalCount: missingEvals.length,
         unexpectedEvalCount: unexpectedEvals.length,
         invalidEvalCount: invalidEvals.length,
+        measurementInvalidEvalCount: measurementInvalidEvals.length,
         missingEvals,
         invalidEvals,
+        measurementInvalidEvals,
         unexpectedEvals,
       },
       null,

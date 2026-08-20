@@ -1292,12 +1292,18 @@ jobs:
 
           mkdir -p all-results
           JSON_FILES=$(find all-results/ -name results.json 2>/dev/null || true)
-          EXPECTED_LEG_COUNT=$(printf '%s' "$EXPECTED_ENTRIES" | jq -e 'if type == "array" then length else error("expected matrix entries must be an array") end')
+          MATRIX_MANIFEST_VALID=true
+          if ! EXPECTED_LEG_COUNT=$(printf '%s' "$EXPECTED_ENTRIES" | jq -e 'if type == "array" then length else error("expected matrix entries must be an array") end'); then
+            MATRIX_MANIFEST_VALID=false
+            EXPECTED_LEG_COUNT=0
+          fi
           OBSERVED_LEG_COUNT=$(find all-results/ -name adapter-summary.json -type f 2>/dev/null | wc -l | tr -d ' ')
           # Per-leg adapter summaries prove completeness only inside artifacts
           # that exist. Never turn a surviving subset into a matrix-wide verdict.
-          if [[ "$EVALUATE_RESULT" != "success" || "$OBSERVED_LEG_COUNT" -ne "$EXPECTED_LEG_COUNT" ]]; then
-            if [[ "$EVALUATE_RESULT" == "skipped" ]]; then
+          if [[ "$MATRIX_MANIFEST_VALID" != "true" || "$EVALUATE_RESULT" != "success" || "$OBSERVED_LEG_COUNT" -ne "$EXPECTED_LEG_COUNT" ]]; then
+            if [[ "$MATRIX_MANIFEST_VALID" != "true" ]]; then
+              BODY=$(printf '❌ Evaluation matrix metadata is invalid: the discovered entry list was missing, malformed, or not a JSON array. Check the discover job output in the [workflow run](%s); no quality verdict was published.' "$RUN_URL")
+            elif [[ "$EVALUATE_RESULT" == "skipped" ]]; then
               BODY="❌ Evaluation did not complete (an upstream job failed or was skipped, so evaluation never ran). [View workflow run](${RUN_URL})"
             elif [[ "$EVALUATE_RESULT" == "success" ]]; then
               BODY=$(printf '❌ Evaluation result artifacts are incomplete: expected %s matrix leg artifact(s), but found %s. Check the [workflow run](%s) artifact upload and download logs, then comment `/evaluate %s` to retry this exact commit.' "$EXPECTED_LEG_COUNT" "$OBSERVED_LEG_COUNT" "$RUN_URL" "${{ needs.gate.outputs.head_sha }}")

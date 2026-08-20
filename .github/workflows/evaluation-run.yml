@@ -855,7 +855,8 @@ jobs:
             const ok = s.expectedManifestProvided === true
               && s.expectedEvalCount === expected
               && s.writtenResultCount === expected
-              && s.unexpectedEvalCount === 0;
+              && s.unexpectedEvalCount === 0
+              && s.measurementInvalidEvalCount === 0;
             if (!ok) {
               console.error(JSON.stringify(s));
               process.exit(1);
@@ -869,6 +870,7 @@ jobs:
             console.log('Result accounting: expected=' + s.expectedEvalCount
               + ', written=' + s.writtenResultCount
               + ', invalid=' + s.invalidEvalCount
+              + ', measurement-invalid=' + s.measurementInvalidEvalCount
               + ', manifest-missing=' + s.missingEvalCount
               + ', unexpected=' + s.unexpectedEvalCount);
           " "$ADAPTER_SUMMARY"

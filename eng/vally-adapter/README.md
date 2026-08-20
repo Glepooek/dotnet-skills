@@ -162,13 +162,17 @@ collector to distinguish:
 - a malformed or invalid result.
 
 The run fails closed unless expected, observed, and written identities match
-exactly. This proof applies inside each matrix leg. Discovery omits entries with
-no eval specs. The PR collector separately requires the full reusable matrix to
-succeed and requires one downloaded `adapter-summary.json` per declared matrix
-entry before it renders any verdict. Partial artifacts remain available for
-diagnosis, but they are labeled incomplete and are never consolidated into
-quality evidence. A leg that found evals also fails if its primary result
-artifact is missing.
+exactly and no measurement-invalid result remains. Missing execution arms,
+unresolved judge or pairing errors, malformed reports, and unknown invalid
+states fail the matrix leg after diagnostic artifacts are written. The explicit
+`underpowered` eval-design state remains visible as instrument debt but does not
+become an infrastructure failure. This proof applies inside each matrix leg.
+Discovery omits entries with no eval specs. The PR collector separately requires
+the full reusable matrix to succeed and requires one downloaded
+`adapter-summary.json` per declared matrix entry before it renders any verdict.
+Partial artifacts remain available for diagnosis, but they are labeled
+incomplete and are never consolidated into quality evidence. A leg that found
+evals also fails if its primary result artifact is missing.
 
 ### 3. Run three Vally variants
 
@@ -310,7 +314,8 @@ measurement-health layer is valid.
 | --- | --- | --- | --- |
 | Expected / observed / written | Did every planned result appear exactly once and get persisted? | Final exact-commit run `32232320378`: `8 / 8 / 8` | Any mismatch is invalid. Inspect discovery, matrix status, upload, and aggregation. |
 | Missing / unexpected / duplicate | Is result identity complete and unique? | Expected skill A, received skill B, or received skill A twice | Fix manifest or result routing. Do not infer quality from the partial set. |
-| Invalid result count | Did any adapter result fail schema or evidence checks? | One report has no paired trials | Inspect `invalidReason` and raw artifacts. |
+| Invalid result count | Did any adapter result fail schema, evidence, or task-breadth checks? | One report has no paired trials, or an eval is underpowered | Inspect `stateReason` and raw artifacts. |
+| Measurement-invalid eval count | Did execution, judge, pairing, or adapter failure make any result untrustworthy? | The skilled arm produced no records | Must be zero. The matrix leg fails after it preserves diagnostics. Explicit `underpowered` design debt is excluded. |
 | Stable paired slot identity | Can baseline and skilled evidence be paired without guessing? | `(prompt-a, 0)` exists once in both arms | Fix missing, negative, or duplicate `trialIndex` values before comparing. |
 | Comparison judge errors | Did the judge fail independently of the skill? | `session.idle` or disabled organization | Retry the exact slot once; invalidate if it remains errored. |
 | Retry recovery | Did the targeted retry repair failed slots? | `1 attempted / 1 recovered / 0 unresolved` | If unresolved is nonzero, inspect judge diagnostics; do not count it as a loss. |

@@ -28,7 +28,7 @@ function writeJsonl(path, records) {
   writeFileSync(path, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
 }
 
-function createExperiment(root) {
+function createExperimentWithVariants(root, variants) {
   const runDir = join(root, "experiment");
   const record = {
     type: "trial-result",
@@ -36,9 +36,22 @@ function createExperiment(root) {
     status: "success",
     stimulus: "Scenario",
   };
-  writeJsonl(join(runDir, "baseline", "results.jsonl"), [{ ...record, variant: "baseline" }]);
-  writeJsonl(join(runDir, "skilled", "results.jsonl"), [{ ...record, variant: "skilled" }]);
+  for (const variant of variants) {
+    writeJsonl(join(runDir, variant, "results.jsonl"), [{ ...record, variant }]);
+  }
   return runDir;
+}
+
+function createExperiment(root) {
+  return createExperimentWithVariants(root, ["baseline", "skilled"]);
+}
+
+function createBaselineOnlyExperiment(root) {
+  return createExperimentWithVariants(root, ["baseline"]);
+}
+
+function createSkilledOnlyExperiment(root) {
+  return createExperimentWithVariants(root, ["skilled"]);
 }
 
 function createEmptyExperiment(root) {
@@ -296,6 +309,7 @@ test("a malformed comparison report becomes one explicit invalid result", () => 
     const summary = JSON.parse(readFileSync(join(outputRoot, "adapter-summary.json"), "utf8"));
     assert.equal(summary.writtenResultCount, 1);
     assert.deepEqual(summary.invalidEvals, [evalFile]);
+    assert.deepEqual(summary.measurementInvalidEvals, [evalFile]);
   });
 });
 
@@ -343,9 +357,9 @@ test("surfaces unmatched trajectories in the verdict", () => {
 
 // An eval with too few distinct stimuli cannot clear the exact sign-test bar at
 // any effect size, so one lucky task must not pass outright.
-test("reports a below-floor eval as underpowered rather than as a pass", () => {
+test("reports a below-floor eval as underpowered rather than as a measurement failure", () => {
   withTempDir((root) => {
-    const { result, verdict } = runAdapter(root, "clean", 1);
+    const { result, verdict, outputRoot } = runAdapter(root, "clean", 1);
     assert.equal(result.status, 0, result.stderr);
     assert.equal(verdict.conclusive, true, "the comparison itself completed");
     assert.equal(verdict.underpowered, true);
@@ -357,6 +371,11 @@ test("reports a below-floor eval as underpowered rather than as a pass", () => {
     assert.match(verdict.reason, /won every one of them/);
     assert.match(verdict.reason, /repeated runs do not increase task breadth/);
     assert.match(result.stdout, /⚠️/);
+
+    const summary = JSON.parse(readFileSync(join(outputRoot, "adapter-summary.json"), "utf8"));
+    assert.equal(summary.invalidEvalCount, 1);
+    assert.equal(summary.measurementInvalidEvalCount, 0);
+    assert.deepEqual(summary.measurementInvalidEvals, []);
   });
 });
 
@@ -392,6 +411,7 @@ test("writes an explicit invalid verdict for every expected eval", () => {
     assert.equal(summary.writtenResultCount, 2);
     assert.deepEqual(summary.missingEvals, [missingEval]);
     assert.deepEqual(summary.invalidEvals, [missingEval]);
+    assert.deepEqual(summary.measurementInvalidEvals, [missingEval]);
   });
 });
 
@@ -434,7 +454,35 @@ test("writes an explicit invalid result when the entire eval run is empty", () =
     assert.equal(summary.writtenResultCount, 1);
     assert.deepEqual(summary.missingEvals, [evalFile]);
     assert.deepEqual(summary.invalidEvals, [evalFile]);
+    assert.equal(summary.measurementInvalidEvalCount, 1);
+    assert.deepEqual(summary.measurementInvalidEvals, [evalFile]);
   });
+});
+
+test("marks either missing comparison arm as measurement-invalid", () => {
+  const cases = [
+    [createBaselineOnlyExperiment, "missing_skilled_records"],
+    [createSkilledOnlyExperiment, "missing_baseline_records"],
+  ];
+  for (const [experimentFactory, expectedCode] of cases) {
+    withTempDir((root) => {
+      const { result, verdict, outputRoot } = runAdapter(
+        root,
+        "clean",
+        5,
+        [evalFile],
+        experimentFactory,
+      );
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(verdict.stateReason.code, expectedCode);
+
+      const summary = JSON.parse(readFileSync(join(outputRoot, "adapter-summary.json"), "utf8"));
+      assert.equal(summary.missingEvalCount, 0);
+      assert.equal(summary.invalidEvalCount, 1);
+      assert.equal(summary.measurementInvalidEvalCount, 1);
+      assert.deepEqual(summary.measurementInvalidEvals, [evalFile]);
+    });
+  }
 });
 
 // --- the gate itself --------------------------------------------------------
