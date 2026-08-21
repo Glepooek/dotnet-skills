@@ -78,14 +78,16 @@ that only plugins needing an inline Claude manifest carry (e.g. `dotnet-msbuild`
 server). Consumers (Copilot CLI, Claude, Codex, Cursor) read the version directly from this
 repository.
 
-Versioning is automated with [Nerdbank.GitVersioning](https://github.com/dotnet/Nerdbank.GitVersioning).
-A per-plugin `plugins/<plugin>/version.json` scopes the git height to that plugin's subtree, so the
-**patch** number is derived from history — you do not edit it by hand. The generated manifests
+Each `plugins/<plugin>/version.json` declares the plugin's major/minor release base and the files
+that count as effective plugin content. A calculated manifest version transition is a release
+checkpoint; an arbitrary patch edit is not. When effective content on `main` differs from the
+latest valid checkpoint, the **patch** advances once.
+The generated manifests
 (`plugin.json`, `.codex-plugin/plugin.json`, and `.claude-plugin/plugin.json` where present) and
-`version.json` itself are excluded from that height via the `pathFilters`, so editing only manifest
-metadata (anything other than a deliberate base bump in `version.json`) does **not** change the patch
-number and is **not** picked up by `/version-bump` or the weekly sync. Touch a skill or other plugin
-content to bump the version.
+`version.json` itself are excluded from content comparison via the `pathFilters`, so editing only
+manifest metadata (anything other than a deliberate base bump in `version.json`) does **not** change
+the patch number and is **not** picked up by `/version-bump` or the weekly sync. Touch a skill or
+other plugin content to bump the version.
 
 What this means when you contribute:
 
@@ -98,14 +100,15 @@ What this means when you contribute:
 - **The only version field you may change is the base** (`"version"`) in `plugins/<plugin>/version.json`,
   and only to declare a deliberate **minor or major** release of that plugin (e.g. `0.1` → `0.2` or `1.0`).
   Changing the base resets the patch number to `0`.
-- After a PR changes a plugin's content, bumping its version is optional:
+- After a PR changes a plugin's content, stamping its calculated version on the branch is optional:
   - A maintainer can comment **`/version-bump`** on a same-repo PR to stamp the new version onto the branch.
-  - Otherwise the **weekly version sync** opens a PR that stamps any plugin whose content changed without a
-    version bump, explaining each change. Nothing is ever missed.
+  - Otherwise the **weekly version sync** opens a PR that stamps any plugin whose content changed since its
+    release checkpoint, explaining each change. Nothing is ever missed.
 
-Patch numbers are predicted from git history, so two PRs bumped concurrently can land the same patch
-number for a plugin; the weekly sync recomputes the authoritative height on `main` and reconciles any
-collision. Version-only changes do not trigger skill evaluations.
+Two PRs stamped concurrently can predict the same patch number. The weekly sync compares effective
+content with the latest first-parent release checkpoint and reconciles the second change. Branch-local
+merge history cannot inflate a version when it makes no content change on `main`. Version-only changes
+do not trigger skill evaluations.
 
 ## Before you start
 
