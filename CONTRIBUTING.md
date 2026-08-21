@@ -280,34 +280,34 @@ stimuli:
 
 > [!IMPORTANT]
 > `defaults:` and `config:` are the same block — `config` is a deprecated alias — and vally
-> **rejects** a spec declaring both. Many existing evals still open with `config:`; when you add
-> `runs`, merge the two into a single `defaults:` block. The failure is silent: the job exits 0 with
+> **rejects** a spec declaring both. Some existing evals still open with `config:`; replace it with
+> one `defaults:` block when settings change. The failure is silent: the job exits 0 with
 > no verdicts and the PR comment blames "transient infrastructure".
 
 Each skill is evaluated in up to three variants — **baseline** (no skills), **skilled** (only the skill under test), and **plugin** (the whole plugin loaded) — and a skill "passes" only when the skilled run is a *credible* improvement over baseline. To assert that a skill should stay dormant for an out-of-scope task, add `expect_activation: false` to that stimulus. See any existing `tests/*/*/eval.yaml` for a fuller example of the grader and stimulus format.
 
 #### Size the eval so it can return a verdict
 
-The pass gate has two independent bars. `trials = stimuli × runs`.
+The pass gate gives each distinct stimulus one vote. Repeated runs collapse to one
+majority-direction vote and remain available as reliability evidence.
 
-1. **Counted trials ≥ 5**, else the verdict is reported `underpowered` — never a pass, never a
+1. **Distinct stimuli ≥ 5**, else the verdict is reported `underpowered` — never a pass, never a
    regression.
-2. **p ≤ 0.05 on an exact one-sided sign test over the *discordant* (non-tie) trials.** Ties are not
+2. **p ≤ 0.05 on an exact one-sided sign test over *discordant* (non-tie) stimulus votes.** Ties are not
    discarded; they hold the discordant count down.
 
-| discordant trials | records that pass | p |
+| discordant stimulus votes | records that pass | p |
 | ---: | --- | ---: |
 | ≤ 4 | none, however good the skill | ≥ 0.0625 |
 | 5–7 | zero losses only (5W/0L) | 0.031 |
 | 8 | one loss survivable (7W/1L) | 0.035 |
 
-At exactly 5 counted trials a single tie is fatal — it leaves 4 discordant. At 6 counted trials one
+At exactly 5 stimuli a single tie is fatal — it leaves 4 discordant votes. At 6 stimuli one
 tie is survivable (5W/1T/0L); at 7, up to two are (5W/2T/0L). A loss is not. Five is an *eligibility
 floor*, not adequate
-power. A run that measured a 32% tie rate certified a
-genuinely-helping five-trial eval about one time in ten; at fifteen trials, about nine times in ten.
-Prefer adding **discriminating stimuli** over raising `runs` — repeats measure the same task. See
-[`eng/eval-quality/README.md`](eng/eval-quality/README.md) for the full derivation and for the ten
+power. Add **discriminating stimuli** for task breadth. Use `runs` only to measure pass rate,
+pass@k, pass^k, and flakiness for the same tasks. See
+[`eng/eval-quality/README.md`](eng/eval-quality/README.md) for the full derivation and for the eleven
 structural defects the CI quality gate blocks.
 
 Run the gate locally before pushing:
@@ -347,7 +347,12 @@ Per-skill verdicts are written to `./eval-results/<plugin>/<skill>/results.json`
 
 Tests do **not** run automatically on pull requests. When a PR changes skills, the `pr-status` job posts a pending commit status and a maintainer must trigger the evaluation, binding it to a specific reviewed commit — either by submitting a PR review ("Files changed" → "Review changes") whose body contains `/evaluate` (recommended, no SHA to copy), or by commenting `/evaluate <sha>`. A bare `/evaluate` comment only posts guidance. Results are posted as a PR comment and uploaded as build artifacts.
 
-If a scenario fails or regresses, see [Investigating Results](eng/vally-adapter/InvestigatingResults.md) for how to download artifacts, interpret `results.json`, and diagnose common failure patterns.
+For the architecture, metrics, verdict policy, and real repair examples, see the
+[Skill evaluation infrastructure overview](eng/vally-adapter/README.md). If a
+scenario fails or regresses, see
+[Investigating Results](eng/vally-adapter/InvestigatingResults.md) for how to
+download artifacts, interpret `results.json`, and diagnose common failure
+patterns.
 
 ## Writing style
 
