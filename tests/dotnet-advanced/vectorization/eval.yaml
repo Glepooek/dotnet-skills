@@ -14,7 +14,7 @@ stimuli:
         - src: fixtures/TailSearch.cs
           dest: TailSearch.cs
     constraints:
-      reject_tools: [edit, create]
+      reject_tools: [bash, edit, create]
     graders:
       - type: exit-success
       - type: prompt
@@ -82,7 +82,7 @@ stimuli:
         - src: fixtures/LastMatch.cs
           dest: LastMatch.cs
     constraints:
-      reject_tools: [edit, create]
+      reject_tools: [bash, edit, create]
     graders:
       - type: exit-success
       - type: prompt
@@ -100,7 +100,7 @@ stimuli:
         - src: fixtures/ZeroBytes.cs
           dest: ZeroBytes.cs
     constraints:
-      reject_tools: [edit, create]
+      reject_tools: [bash, edit, create]
     graders:
       - type: exit-success
       - type: prompt
@@ -118,7 +118,7 @@ stimuli:
         - src: fixtures/AsciiLetters.cs
           dest: AsciiLetters.cs
     constraints:
-      reject_tools: [edit, create]
+      reject_tools: [bash, edit, create]
     graders:
       - type: exit-success
       - type: prompt
@@ -137,7 +137,7 @@ stimuli:
         - src: fixtures/ContainsZero.cs
           dest: ContainsZero.cs
     constraints:
-      reject_tools: [edit, create]
+      reject_tools: [bash, edit, create]
     graders:
       - type: exit-success
       - type: prompt
