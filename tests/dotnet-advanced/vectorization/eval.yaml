@@ -21,8 +21,7 @@ stimuli:
     rubric:
       - Identifies that short inputs produce a negative last-vector index which becomes a very large unsigned offset
       - Explains that the length must be checked before subtracting a vector width
-      - Prefers an existing accelerated span search over retaining a hand-written loop
-      - If retaining explicit SIMD, recommends a scalar small-input path, safe span loading, and an overlapping final vector
+      - Recommends either an existing accelerated span search or an explicit loop with a scalar small-input path, safe span loading, and an overlapping final vector
 
   - name: Repair vectorized reduction safely
     prompt: |
@@ -49,11 +48,11 @@ stimuli:
       - type: file-not-contains
         config:
           path: SumValues.cs
-          value: LoadUnsafe
+          value: LoadUnsafe(
       - type: file-not-contains
         config:
           path: SumValues.cs
-          value: MemoryMarshal
+          value: MemoryMarshal.
       - type: run-command
         config:
           command: dotnet run --project SumValues.csproj
@@ -106,8 +105,7 @@ stimuli:
       - type: prompt
     rubric:
       - Identifies that indexing element zero throws before the empty-input behavior can be honored
-      - Prefers an existing accelerated span operation that handles empty input
-      - If retaining explicit SIMD, recommends bounds-checked span-based vector creation rather than managed-reference loading
+      - Recommends either an existing accelerated span operation that handles empty input or explicit SIMD with bounds-checked span-based vector creation
 
   - name: Detect unsupported vector element type
     prompt: |
@@ -143,8 +141,7 @@ stimuli:
       - type: prompt
     rubric:
       - Identifies that unsupported AVX2 currently changes the result instead of selecting an equivalent implementation
-      - Prefers an existing accelerated span search that behaves consistently across architectures
-      - If retaining explicit SIMD, recommends portable fixed-width dispatch, safe span loading, and an equivalent narrower or scalar fallback
+      - Recommends either an existing accelerated cross-platform span search or explicit SIMD with portable fixed-width dispatch, safe span loading, and an equivalent narrower or scalar fallback
 
   - name: Preserve product empty-input contract
     prompt: |
@@ -199,11 +196,15 @@ stimuli:
       - type: file-not-contains
         config:
           path: ConditionalIncrement.cs
-          value: LoadUnsafe
+          value: LoadUnsafe(
       - type: file-not-contains
         config:
           path: ConditionalIncrement.cs
-          value: MemoryMarshal
+          value: StoreUnsafe(
+      - type: file-not-contains
+        config:
+          path: ConditionalIncrement.cs
+          value: MemoryMarshal.
       - type: file-not-contains
         config:
           path: ConditionalIncrement.cs
@@ -257,10 +258,6 @@ stimuli:
         config:
           path: ClampNegative.cs
           value: Vector128.IsHardwareAccelerated
-      - type: file-contains
-        config:
-          path: ClampNegative.cs
-          value: ToZeroSmall
       - type: file-not-contains
         config:
           path: ClampNegative.cs
@@ -268,11 +265,15 @@ stimuli:
       - type: file-not-contains
         config:
           path: ClampNegative.cs
-          value: LoadUnsafe
+          value: LoadUnsafe(
       - type: file-not-contains
         config:
           path: ClampNegative.cs
-          value: MemoryMarshal
+          value: StoreUnsafe(
+      - type: file-not-contains
+        config:
+          path: ClampNegative.cs
+          value: MemoryMarshal.
       - type: run-command
         config:
           command: dotnet run --project WidenClamp.csproj

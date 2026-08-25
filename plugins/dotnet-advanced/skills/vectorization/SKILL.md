@@ -36,11 +36,13 @@ project's existing dependency/versioning policy.
 
 ## Core rules
 
-1. **Use the highest-level API that matches the contract.** `Span<T>` and `string` operations,
-   `TensorPrimitives`, and tensor types already accelerate many operations. LINQ reductions such as
-   `Sum`, `Min`, `Max`, and `Average` can also accelerate when the source exposes its underlying
-   span. Verify empty-input and floating-point behavior rather than assuming similarly named
-   operations are interchangeable. Fixed-shape `System.Numerics` types remain appropriate for
+1. **Use the highest-level API that matches the contract, then stop.** `Span<T>` and `string`
+   operations, `TensorPrimitives`, and tensor types already accelerate many operations. LINQ
+   reductions such as `Sum`, `Min`, `Max`, and `Average` can also accelerate when the source exposes
+   its underlying span. Verify empty-input and floating-point behavior rather than assuming similarly
+   named operations are interchangeable. Once an existing API preserves the contract, use it instead
+   of continuing into handwritten SIMD. Before writing an explicit loop, name the framework APIs
+   considered and why none applies. Fixed-shape `System.Numerics` types remain appropriate for
    graphics and similar domains.
 2. **Start new explicit SIMD loops with `Vector128<T>`.** It is accelerated across the broadest
    hardware set. Add wider fixed-width paths only when measurements justify them.
