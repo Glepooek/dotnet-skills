@@ -343,8 +343,8 @@ stimuli:
       - type: prompt
     rubric:
       - Identifies zlib is no longer installed in .NET 9 images; recommends adding apt-get install
-      - Explains environment variables now take precedence over runtimeconfig.json — GC and ThreadPool settings will use
-        env var values
+      - "Explains that in .NET 9 environment variables now take precedence over runtimeconfig.json for GC and
+        ThreadPool settings (a response claiming runtimeconfig still wins, as it did in .NET 8, is wrong)"
       - Warns about .NET Monitor image tag format changes
       - Notes global.json should be updated to 9.0.x SDK
     constraints:
@@ -455,8 +455,9 @@ stimuli:
     rubric:
       - Correctly states environment variables now take precedence in .NET 9 — all three settings (GC Server,
         Concurrent, ThreadPool) will use env var values instead of runtimeconfig
-      - "Explains the concrete impact: app switches from server GC to workstation GC, concurrent GC disabled, min
-        threads drop from 25 to 4"
+      - "States the correct concrete impact: server GC becomes workstation GC, concurrent GC is disabled, and the
+        minimum ThreadPool thread count drops from 25 to 4 (a response claiming any of these values are unchanged —
+        for example that min threads stay at 25 — is factually wrong, however confidently it is stated)"
       - Identifies zlib no longer installed in .NET 9 container images; SkiaSharp/image processing will fail; recommends
         adding apt-get install zlib1g
       - Recommends either removing conflicting env vars or updating runtimeconfig to match desired values
