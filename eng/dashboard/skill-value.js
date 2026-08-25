@@ -120,7 +120,9 @@
       const model = e.model || 'unknown';
       const judge = e.judgeModel || 'unknown';
       for (const s of (e.skills || [])) {
-        const key = `${s.skill}\u0000${model}\u0000${judge}`;
+        // Key includes plugin: two plugins may share a skill name, and the view is
+        // grouped Plugin -> Skill -> Model, so their histories must never blend.
+        const key = `${e.plugin}\u0000${s.skill}\u0000${model}\u0000${judge}`;
         if (!groups.has(key)) groups.set(key, { skill: s.skill, plugin: e.plugin, model, judge, runs: [] });
         groups.get(key).runs.push({ date: e.date || 0, s });
       }
@@ -212,7 +214,9 @@
     let s = `Add <b>${escapeHtml(row.skill)}</b> and <b>${escapeHtml(row.model)}</b> uses ~${Math.abs(tokR * 100).toFixed(0)}% ${tokWord} tokens and ~${Math.abs(timeR * 100).toFixed(0)}% ${timeWord} time for typical scenarios`;
     if (row.hasPass && gated(row.passTotal)) {
       const baseFailFrac = row.passTotal > 0 ? row.baseFail / row.passTotal : 0;
-      s += `; without it ~${fmtPct(baseFailFrac)} of those scenarios do not pass their checks.`;
+      s += `; without it ~${fmtPct(baseFailFrac)} of its counted trials do not pass their checks.`;
+    } else if (row.hasPass) {
+      s += ` (not-passed rate still gathering data: n=${row.passTotal}, need ≥${MIN_SAMPLES}).`;
     } else {
       s += '. (No pass/fail data for a not-passed estimate.)';
     }

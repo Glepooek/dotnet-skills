@@ -1837,6 +1837,15 @@ jobs:
             # keeps each judge's verdicts and its correct judgeModel, which is exactly
             # the dimension the Skill Value view keys on. For a single-judge profile
             # all files share one judge, so this still yields one group per model.
+            #
+            # Scope note: only the PRIMARY judge's results.json (vally-results-*) feed
+            # this benchmark data. The scheduled dual-judge cadence re-scores the same
+            # executor trajectories and uploads under vally-crossjudge-* (see the
+            # "Download second-judge" step), which only feeds judge-comparison.json —
+            # never this loop. So Skill Value and Quality/Efficiency both reflect the
+            # primary judge, and each executor model here carries a single judge.
+            # (The model+judge key and -SkillValueOnly dedup below stay correct even
+            # if a future change ever routes two primary judges into this set.)
             $parsed = @($resultsFiles | Sort-Object | ForEach-Object {
               [pscustomobject]@{ File = $_; Json = (Get-Content $_ -Raw | ConvertFrom-Json) }
             })
