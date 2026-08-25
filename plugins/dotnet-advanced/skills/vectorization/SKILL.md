@@ -63,6 +63,10 @@ before performance opportunities.
 
 - **Contract:** identify behavior for empty and short inputs, overlap, overflow, NaN, signed zero,
   ordering, and exceptions before changing the implementation.
+- **Framework gate:** inspect the target framework and existing package references, then compile or
+  probe the highest-level candidate API with the required edge cases. A small contract adapter, such
+  as preserving special empty-input behavior, does not justify reimplementing the operation. If the
+  API preserves the contract, use it and stop; do not claim it is unavailable without checking.
 - **Structure:** for new explicit SIMD, implement `Vector128<T>` and scalar first. Only after
   measurements justify wider paths, check `Vector512<T>`, then `Vector256<T>`, optional `Vector<T>`,
   `Vector128<T>`, and finally scalar. Omit paths the implementation does not need. Each outer
@@ -86,14 +90,19 @@ before performance opportunities.
   UTF-16, normalizing results before storing when necessary.
 - **Offsets:** prove the input contains a full vector before subtracting `Count` or converting an
   index to `nuint`; otherwise a negative value becomes a huge unsigned offset.
-- **Managed references:** never create a reference before the start or past the end of its object,
-  even temporarily. A collection during that interval can leave an interior reference untracked.
+- **Managed references:** do not form references before the start or past the end of a span,
+  including a one-past-end reference. The runtime permits a non-dereferenced managed pointer exactly
+  one past an object or array, but this guidance intentionally prohibits the pattern because it is
+  fragile and easy to misuse. Keep the base reference in range and express traversal with an element
+  offset.
 - **Remainders:** cover every length, including `0`, `Count - 1`, `Count`, `Count + 1`, and
   nonmultiples of each width. Once the input contains a full vector, keep the tail vectorized by
   reprocessing the last full vector. An idempotent operation can fold that overlap in directly. A
   non-idempotent operation must use `ConditionalSelect` to replace repeated lanes with the
-  operation's identity before folding them in. For in-place transforms, preserve the original tail
-  values before overlapping stores and write only valid results.
+  operation's identity before folding them in. This is the JIT-recognized general pattern; it can
+  reduce a zero-identity selection to a bitwise mask while retaining broader optimization
+  opportunities. For in-place transforms, preserve the original tail values before overlapping
+  stores and write only valid results.
 - **Buffer overlap:** choose a traversal direction or staging strategy that prevents stores from
   corrupting values not yet loaded.
 - **Numeric behavior:** account for floating-point reassociation, NaN and signed-zero semantics,

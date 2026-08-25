@@ -72,7 +72,7 @@ stimuli:
       - Keeps the final partial block vectorized by excluding already-counted lanes
       - Uses the scalar implementation for short inputs and when hardware acceleration is unavailable
 
-  - name: Detect out-of-range backwards reference
+  - name: Reject fragile backwards reference
     prompt: |
       Review LastMatch.cs for correctness and managed-memory safety. Do not edit
       the file.
@@ -86,8 +86,8 @@ stimuli:
       - type: exit-success
       - type: prompt
     rubric:
-      - Identifies the one-past-end managed reference as unsafe even though it is decremented before dereference
-      - Explains that a garbage collection while the reference is outside the object can invalidate tracking
+      - Recognizes that the runtime permits a non-dereferenced managed pointer exactly one past an object or array
+      - Still rejects forming a one-past-span reference as a conservative safety policy because the pattern is fragile and easy to misuse
       - Recommends keeping the base reference in range and using an element offset
 
   - name: Detect empty-span reference access
