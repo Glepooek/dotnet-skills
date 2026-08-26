@@ -171,13 +171,23 @@
     return (baseVal - treatVal) / baseVal;
   }
 
+  // Render a reduction as a signed percent: '−N%' = N% less (good), '+N%' = N%
+  // more, '0%' = no measurable change. Zero — exact or rounded — never gets a
+  // sign, so "no change" is not misread as a +0% regression.
+  function signedPct(r, nullText) {
+    if (r == null) return nullText;
+    const pct = Math.round(r * 100);
+    if (pct === 0) return '0%';
+    return `${pct > 0 ? '−' : '+'}${Math.abs(pct)}%`;
+  }
+
   function deltaCell(base, treat, unitFmt, diluted) {
     if (base == null || treat == null) return '<td class="num">–</td>';
     const r = reduction(base, treat);
     const abs = treat - base;
     const cls = r == null ? 'neutral' : (r > 0 ? 'positive' : (r < 0 ? 'negative' : 'neutral'));
     const sign = abs > 0 ? '+' : '';
-    const pctTxt = r == null ? '' : `${r > 0 ? '−' : '+'}${Math.abs(r * 100).toFixed(0)}%`;
+    const pctTxt = signedPct(r, '');
     // When the skill barely fires, the treatment arm is mostly baseline, so this
     // delta understates the on-activation effect. Mark it so it is not misread.
     const dil = diluted ? ' sv-diluted' : '';
@@ -255,7 +265,7 @@
         `(in ${fmtK(a.tokensIn)} / out ${fmtK(a.tokensOut)}) · ` +
         `cache read ${fmtK(a.cacheRead)} / write ${fmtK(a.cacheWrite)} · n=${a.n}</div>`;
     };
-    const pairedN = row.baseline ? row.baseline.n : 0;
+    const pairedN = Math.min(row.baseline ? row.baseline.n : 0, row.treatment ? row.treatment.n : 0);
     // Surface how many scenarios each arm measured on its own vs. the paired set,
     // and any timed-out runs — both indicate selective missingness that could bias
     // an unpaired reading (e.g. treatment timeouts dropping the slowest cases).
@@ -273,7 +283,7 @@
   // A (skill, executor, judge) leaf reached a confident value claim.
   function isConfirmed(row) { return valueSentence(row).cls === 'sv-value'; }
 
-  function pctSigned(r) { return r == null ? 'n/a' : `${r > 0 ? '−' : '+'}${Math.abs(r * 100).toFixed(0)}%`; }
+  function pctSigned(r) { return signedPct(r, 'n/a'); }
 
   // Rollup for a group that resolves to a SINGLE model leaf (e.g. a skill with one
   // model, or any group once the viewer filters to one executor/judge). With one

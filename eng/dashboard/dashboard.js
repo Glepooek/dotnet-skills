@@ -1152,5 +1152,9 @@
   } else if (plugins.length > 0) {
     // Defensive fallback: if skill-value.js failed to load, activate the first plugin.
     await switchTab(plugins[0]);
+  } else {
+    // No plugins either — fall back to Token Usage so the page is not stuck on
+    // the Skill Value panel's permanent "Loading…".
+    await switchTab(tokenTabId);
   }
 })();
