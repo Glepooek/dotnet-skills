@@ -160,11 +160,54 @@ function Get-MeanOrNull([double]$sum, [int]$count) {
     return $null
 }
 
+function Update-SkillValueIndex([string]$Directory) {
+    if (-not (Test-Path $Directory)) { return }
+
+    $entries = [System.Collections.Generic.List[object]]::new()
+    $reservedFiles = @(
+        "components.json",
+        "token-usage.json",
+        "judge-comparison.json",
+        "skill-value.json"
+    )
+    $pluginFiles = Get-ChildItem -Path $Directory -Filter "*.json" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notin $reservedFiles } |
+        Sort-Object Name
+
+    foreach ($file in $pluginFiles) {
+        try {
+            $data = Get-Content $file.FullName -Raw | ConvertFrom-Json
+            foreach ($entry in @($data.entries.SkillValue)) {
+                if ($null -eq $entry) { continue }
+                $entries.Add([ordered]@{
+                    plugin     = $file.BaseName
+                    commit     = $entry.commit
+                    date       = $entry.date
+                    model      = $entry.model
+                    judgeModel = $entry.judgeModel
+                    skills     = $entry.skills
+                })
+            }
+        } catch {
+            Write-Warning "Failed to add $($file.Name) to skill-value.json: $_"
+        }
+    }
+
+    $index = [ordered]@{
+        schemaVersion = 1
+        lastUpdate    = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        entries       = $entries.ToArray()
+    }
+    $index | ConvertTo-Json -Depth 10 |
+        Out-File -FilePath (Join-Path $Directory "skill-value.json") -Encoding utf8
+    Write-Host "[OK] Skill Value index generated: $($entries.Count) entries"
+}
+
 # --- Purge mode: scan a data directory and remove stale files ---
 if ($PurgeStaleFiles) {
     $cutoffMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - ([long]$RetentionDays * 24 * 60 * 60 * 1000)
     $dataFiles = Get-ChildItem -Path $DataDir -Filter "*.json" -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -ne "components.json" }
+        Where-Object { $_.Name -notin @("components.json", "skill-value.json") }
     foreach ($file in $dataFiles) {
         try {
             $data = Get-Content $file.FullName -Raw | ConvertFrom-Json -AsHashtable
@@ -176,7 +219,10 @@ if ($PurgeStaleFiles) {
                 $data['entries'] = @($data['entries'] | Where-Object { $_.date -ge $cutoffMs })
                 if ($data['entries'].Count -gt 0) { $hasRecentEntries = $true }
             } else {
-                foreach ($category in $data['entries'].Keys) {
+                # Snapshot the keys before replacing category arrays. Enumerating
+                # the live hashtable key collection while assigning values can
+                # throw "Collection was modified" in PowerShell.
+                foreach ($category in @($data['entries'].Keys)) {
                     $data['entries'][$category] = @($data['entries'][$category] | Where-Object { $_.date -ge $cutoffMs })
                     if ($data['entries'][$category].Count -gt 0) { $hasRecentEntries = $true }
                 }
@@ -191,6 +237,9 @@ if ($PurgeStaleFiles) {
             Write-Warning "Failed to process $($file.Name) for purge: $_"
         }
     }
+    # Rebuild after purge so the compact index cannot retain entries removed from
+    # the source plugin histories.
+    Update-SkillValueIndex $DataDir
     exit 0
 }
 

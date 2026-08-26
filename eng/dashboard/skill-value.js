@@ -4,11 +4,11 @@
 // Answers, per skill: "Add this skill and model X uses ~M% fewer tokens and
 // ~Y% less time for typical scenarios; without it ~p% of those scenarios do not
 // pass their checks."
-// Data source: the `entries.SkillValue` array inside each per-plugin
-// <PluginName>.json on the dashboard-eval-data branch (emitted by
-// eng/dashboard/generate-benchmark-data.ps1). Both arms — baseline (without the
-// skill) and treatment (with the skill) — are carried per run, so the whole view
-// is computed client-side with no extra publish job.
+// Data source: compact `data/skill-value.json`, derived from the
+// `entries.SkillValue` arrays in per-plugin dashboard data by
+// eng/dashboard/generate-benchmark-data.ps1. Both arms — baseline (without the
+// skill) and treatment (with the skill) — are carried per run. The compact index
+// avoids downloading every plugin's large Quality/Efficiency history on startup.
 (function () {
   let initialized = false;
 
@@ -82,26 +82,14 @@
     initialized = true;
 
     const container = document.getElementById('skill-value-content');
-    let plugins = [];
+    let entries = [];
     try {
-      const res = await fetch('data/components.json');
-      if (res.ok) plugins = await res.json();
-    } catch { /* fall through to empty */ }
-    if (!Array.isArray(plugins)) plugins = [];
-
-    // Gather SkillValue entries from every plugin file.
-    const entries = [];
-    await Promise.all(plugins.map(async (plugin) => {
-      try {
-        const res = await fetch(`data/${plugin}.json`);
-        if (!res.ok) return;
+      const res = await fetch('data/skill-value.json');
+      if (res.ok) {
         const data = await res.json();
-        const sv = data && data.entries && data.entries.SkillValue;
-        if (Array.isArray(sv)) {
-          for (const e of sv) entries.push({ plugin, ...e });
-        }
-      } catch { /* skip unreadable plugin */ }
-    }));
+        if (Array.isArray(data.entries)) entries = data.entries;
+      }
+    } catch { /* fall through to empty */ }
 
     if (entries.length === 0) {
       container.innerHTML = '<p style="color:#8b949e;text-align:center;padding:2rem;">No skill-value data available yet. It is produced by scheduled evaluation runs.</p>';
