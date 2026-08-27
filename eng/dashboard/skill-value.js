@@ -231,7 +231,7 @@
   }
 
   function failureCell(row) {
-    if (!row.hasPass || row.passTotal === 0) return '<td class="num" title="No pass/fail data — skill has no boolean graders">N/A</td>';
+    if (!row.hasPass || row.passTotal === 0) return '<td class="num" title="No counted baseline/treatment pass data is available">N/A</td>';
     if (!gated(row.passTotal)) return `<td class="num"><span class="sv-insufficient">n=${row.passTotal}</span></td>`;
     const b = row.baseFail / row.passTotal;
     const t = row.treatFail / row.passTotal;
