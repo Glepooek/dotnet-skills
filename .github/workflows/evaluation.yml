@@ -2094,9 +2094,14 @@ jobs:
         (
           github.event_name == 'workflow_dispatch' &&
           inputs.pr_number == '' &&
-          github.repository == 'dotnet/skills' &&
           github.ref == 'refs/heads/main' &&
-          (!inputs.publish_eval_data || needs.publish-eval-data.result == 'success')
+          (
+            !inputs.publish_eval_data ||
+            (
+              github.repository == 'dotnet/skills' &&
+              needs.publish-eval-data.result == 'success'
+            )
+          )
         )
       )
     concurrency:

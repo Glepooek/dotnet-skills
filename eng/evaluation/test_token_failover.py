@@ -488,14 +488,28 @@ esac
         self.assertIn("github.ref == 'refs/heads/main'", publish_condition)
         self.assertIn("needs.evaluate.result == 'success'", publish_condition)
 
-        deploy_condition = workflow["jobs"]["deploy-dashboard"]["if"]
+        deploy_job = workflow["jobs"]["deploy-dashboard"]
+        self.assertIn("publish-eval-data", deploy_job["needs"])
+        deploy_condition = deploy_job["if"]
         self.assertIn("inputs.pr_number == ''", deploy_condition)
         self.assertIn("github.repository == 'dotnet/skills'", deploy_condition)
         self.assertIn("github.ref == 'refs/heads/main'", deploy_condition)
+        normalized_deploy_condition = " ".join(deploy_condition.split())
+        self.assertEqual(
+            deploy_condition.count("github.repository == 'dotnet/skills'"),
+            1,
+        )
         self.assertIn(
-            "!inputs.publish_eval_data || "
-            "needs.publish-eval-data.result == 'success'",
-            deploy_condition,
+            "github.event_name == 'workflow_dispatch' && "
+            "inputs.pr_number == '' && github.ref == 'refs/heads/main' && "
+            "( !inputs.publish_eval_data",
+            normalized_deploy_condition,
+        )
+        self.assertIn(
+            "( !inputs.publish_eval_data || "
+            "( github.repository == 'dotnet/skills' && "
+            "needs.publish-eval-data.result == 'success' ) )",
+            normalized_deploy_condition,
         )
 
     def test_pr_report_binds_identity_and_reruns_to_exact_commit(self) -> None:
