@@ -11,6 +11,7 @@
 // avoids downloading every plugin's large Quality/Efficiency history on startup.
 (function () {
   let initialized = false;
+  let initialization = null;
 
   // ── Tunable thresholds (documented in eng/dashboard skill-value design) ──
   // Minimum PAIRED OBSERVATIONS (scenario-runs measured in both arms, summed
@@ -79,24 +80,30 @@
   // ── Public entry point ──────────────────────────────────────────────
   window.initSkillValue = async function () {
     if (initialized) return;
-    initialized = true;
+    if (initialization) return initialization;
 
     const container = document.getElementById('skill-value-content');
-    let entries = [];
-    try {
-      const res = await fetch('data/skill-value.json');
-      if (res.ok) {
+    initialization = (async () => {
+      try {
+        const res = await fetch('data/skill-value.json');
+        if (!res.ok) throw new Error(res.statusText);
         const data = await res.json();
-        if (Array.isArray(data.entries)) entries = data.entries;
+        const entries = Array.isArray(data.entries) ? data.entries : [];
+
+        if (entries.length === 0) {
+          container.innerHTML = '<p style="color:#8b949e;text-align:center;padding:2rem;">No skill-value data available yet. It is produced by scheduled evaluation runs.</p>';
+        } else {
+          render(container, entries);
+        }
+        initialized = true;
+      } catch {
+        container.innerHTML = '<p style="color:#8b949e;text-align:center;padding:2rem;">Unable to load skill-value data. Select the Skill Value tab to retry.</p>';
+      } finally {
+        initialization = null;
       }
-    } catch { /* fall through to empty */ }
+    })();
 
-    if (entries.length === 0) {
-      container.innerHTML = '<p style="color:#8b949e;text-align:center;padding:2rem;">No skill-value data available yet. It is produced by scheduled evaluation runs.</p>';
-      return;
-    }
-
-    render(container, entries);
+    return initialization;
   };
 
   // Aggregate entries into per-(skill, model, judgeModel) rows over the trailing

@@ -27,8 +27,8 @@
     plugins = [];
   }
 
-  // skill-value.json is a compact derived index, not a dashboard plugin. Older
-  // components manifests can include it because they list every JSON data file.
+  // skill-value.json is a compact derived index, not a dashboard plugin.
+  // Components manifests may include it when generated from all JSON data files.
   plugins = plugins.filter(plugin => plugin !== 'skill-value');
   plugins.sort();
 
