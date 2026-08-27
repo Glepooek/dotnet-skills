@@ -27,7 +27,7 @@ Skills and agents for running, generating, analyzing, and improving tests. Origi
 | Skill | Description |
 |---|---|
 | **code-testing-agent** | Multi-agent pipeline (Research → Plan → Implement → Build → Test → Fix → Lint) that generates tests for any language |
-| **scaffold-dotnet-test-project** *(.NET)* | Create and register the first test project when a repository has no suitable test project |
+| **scaffold-dotnet-test-project** *(.NET)* | Create a missing test project or repair its project/solution/filter wiring |
 | **writing-mstest-tests** | Version-compatible MSTest authoring for modern and classic projects, including MSTest 3.x/4.x APIs |
 
 ### Test migration
@@ -82,15 +82,16 @@ experiment's skilled arm loads a single skill, which the model could never
 invoke here, so such an eval would compare two identical arms and score judge
 noise. They are measured through consumer outcomes — the polyglot analysis
 skills and `grade-tests` for `test-analysis-extensions`, `code-testing-agent`
-for `code-testing-extensions`, and `run-tests`, `mtp-hot-reload`, and
-`migrate-vstest-to-mtp` for `filter-syntax`. The `run-tests` eval covers VSTest
-expressions, MTP argument passing, xUnit v3 native filters, and TUnit tree-node
-filters; the migration eval covers translating VSTest filters to xUnit v3's MTP
-syntax.
+for `code-testing-extensions`, and `run-tests` and `mtp-hot-reload` for
+`filter-syntax`. The `run-tests` eval covers VSTest expressions, MTP argument
+passing, xUnit v3 native filters, and TUnit tree-node filters.
 
 `platform-detection` is model-invocable because identifying a project's runner
 is also a direct user task; `run-tests` and migration skills still load it as
-shared detection guidance. `filter-syntax` remains reference-only.
+shared detection guidance. Its command-mode rules use an on-demand reference so
+platform/framework-only requests do not load or echo CLI-mode detail.
+`filter-syntax` remains reference-only and is measured through the
+filtered-command scenarios in the `run-tests` eval.
 
 ## Agents
 

@@ -385,7 +385,12 @@ and preserve its scenarios through reachable consumer outcomes instead.
 
 The current `dotnet-test` reference skills — `code-testing-extensions`,
 `filter-syntax`, and `test-analysis-extensions` — therefore have no direct eval.
-Their consumer coverage is documented in `plugins/dotnet-test/README.md`.
+Their consumer coverage is documented in `plugins/dotnet-test/README.md`;
+`filter-syntax`, for example, is covered through filtered-command scenarios in
+`tests/dotnet-test/run-tests/eval.yaml`, where the consumer can load the
+reference and produce a measurable outcome. Do not add a direct eval for a
+reference-only skill until the harness supports declaring skilled-arm
+dependencies.
 
 ### Dormancy guard without an anti-hijack rubric item
 
