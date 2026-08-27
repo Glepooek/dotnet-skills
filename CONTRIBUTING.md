@@ -367,6 +367,9 @@ Per-skill verdicts are written to `./eval-results/<plugin>/<skill>/results.json`
 
 Tests do **not** run automatically on pull requests. When a PR changes skills, the `pr-status` job posts a pending commit status and a maintainer must trigger the evaluation, binding it to a specific reviewed commit — either by submitting a PR review ("Files changed" → "Review changes") whose body contains `/evaluate` (recommended, no SHA to copy), or by commenting `/evaluate <sha>`. A bare `/evaluate` comment only posts guidance. Results are posted as a PR comment and uploaded as build artifacts.
 
+The [Skill Value dashboard](https://dotnet.github.io/skills/) provides historical
+results for each skill by executor and judge model.
+
 For the architecture, metrics, verdict policy, and real repair examples, see the
 [Skill evaluation infrastructure overview](eng/vally-adapter/README.md). If a
 scenario fails or regresses, see
