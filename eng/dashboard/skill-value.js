@@ -175,7 +175,9 @@
     const abs = treat - base;
     const cls = r == null ? 'neutral' : (r > 0 ? 'positive' : (r < 0 ? 'negative' : 'neutral'));
     const sign = abs > 0 ? '+' : '';
-    const pctTxt = signedPct(r, '');
+    // Null reduction (baseline metric is 0) shows an explicit "n/a", matching the
+    // rollup cells, so the percent is never a blank/ambiguous label.
+    const pctTxt = signedPct(r, 'n/a');
     // When the skill barely fires, the treatment arm is mostly baseline, so this
     // delta understates the on-activation effect. Mark it so it is not misread.
     const dil = diluted ? ' sv-diluted' : '';
