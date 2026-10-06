@@ -311,9 +311,11 @@ through the evals of the skills that load them and through the plugin arm instea
 An eval must prove useful behavior, not only produce a valid YAML file. Authors and reviewers should
 apply this order:
 
-1. **Prove necessity and skill fit.** Add a scenario only when the target skill or agent should
-   change the answer or action. Do not eval generic model knowledge, path recall, or a
-   `disable-model-invocation: true` reference in isolation.
+1. **Prove necessity and skill fit.** A preference scenario is necessary when the target should
+   improve the answer or action. A dormancy contract or no-op guard is necessary when it protects a
+   meaningful routing or preservation invariant, even if correct behavior is baseline-equivalent.
+   Do not eval generic model knowledge, path recall, or a `disable-model-invocation: true` reference
+   in isolation.
 2. **Tag every capability stimulus; add distinct value to voting cases.** Every stimulus in a
    `type: capability` eval must have stable lowercase kebab-case `capability`, `risk`, and `journey`
    tags, including dormancy cases. Each preference-eligible stimulus must cover a different value;

@@ -21,8 +21,10 @@ sounds like a real developer request, or whether the scenario portfolio has prod
 
 Apply these checks before treating a passing gate as a good eval:
 
-1. **Necessity and fit:** the target should change the outcome. Do not measure generic knowledge,
-   path recall, or an unreachable reference skill.
+1. **Necessity and fit:** a preference case should improve the outcome. A dormancy contract or
+   no-op guard may instead protect a meaningful routing or preservation invariant with
+   baseline-equivalent correct behavior. Do not measure generic knowledge, path recall, or an
+   unreachable reference skill.
 2. **Tags and distinct value:** every stimulus in a `type: capability` eval has stable `capability`,
    `risk`, and `journey` tags, including dormancy cases. Each preference-eligible case adds a
    different capability, risk, or customer journey.

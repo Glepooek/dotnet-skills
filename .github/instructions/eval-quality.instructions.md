@@ -12,8 +12,9 @@ checks relevant to that artifact.
 
 Leave an inline comment only for a specific, actionable defect. Check that:
 
-- each scenario is necessary for the target and adds distinct capability, risk, or
-  customer-journey value;
+- each scenario is necessary for the target; each preference-eligible scenario adds distinct
+  capability, risk, or customer-journey value, while dormancy and no-op guards protect a meaningful
+  routing or preservation invariant;
 - prompts are natural developer requests and do not name the skill, reveal the answer, or prescribe
   its workflow;
 - deterministic graders prove the complete required result and, when scope or preservation is part

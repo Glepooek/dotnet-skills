@@ -13,7 +13,8 @@ Symptom → cause → fix, with the PR where each was diagnosed. Use with
 | Trial errored, avgN unusually low | Judge-side CAPI / `session.idle` timeout, not fixture nondeterminism | Read the trial stderr first; fix the harness, do not pin an SDK | PR #907 |
 | Timeout on an advisory question | `expect_tools: [bash]` forced a restore or build | Drop the tool requirement; the answer was always textual | PR #861 |
 | Every grader fails and output is empty | Code-generation stimulus timed out | Raise to ~360s | PR #862, PR #863 |
-| Generic YAML parsing passes but the eval produces no result | The production skill or agent runner rejected the spec, reference, or ATIF trajectory | Reproduce through Vally for a skill or the native SDK lane for an agent, then fix the first loader error | `eng/eval-quality/README.md` |
+| Generic YAML parsing passes but a skill eval produces no result | Vally rejected the spec, golden reference, or ATIF trajectory | Reproduce through the repository Vally path and fix the first loader error | `eng/eval-quality/README.md` |
+| Native agent execution passes but golden validation fails | The native agent parser ignores `golden_trajectory` and `golden_patch` | Run `check_eval_quality.py`, then replay the golden patch and deterministic graders separately | `eng/eval-quality/README.md` |
 | Eval passes with one worker or a larger local timeout only | Concurrency race, shared-state leak, or an unrealistic suite budget | Run with normal workers and `defaults.timeout`; fix the reliability defect instead of certifying the special case | PR #1214 |
 | Only the skilled arm aborts with "contains no SKILL.md" | A setup cleanup command deleted the staged skill directory | Skip directories carrying `SKILL.md` when stripping sources | PR #878 |
 | Trials silently dropped | Setup command exited non-zero although its artifact was produced | Guard intentional failures, e.g. `dotnet build -bl \|\| exit 0` | PR #878 |
