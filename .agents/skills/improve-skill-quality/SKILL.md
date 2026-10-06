@@ -88,8 +88,9 @@ See [references/eval-triage.md](references/eval-triage.md) for the full catalogu
   **inconclusive**: the remaining matched trials are biased, so the record is not a measured null
   and must not be read as a power or content problem.
 - A generic YAML parser is not the production loader. If Vally rejects a skill eval, or the native
-  SDK lane rejects an agent eval, its golden reference, or its ATIF trajectory, classify it as
-  harness / spec-load before changing content.
+  SDK lane rejects an agent eval's executable scenario fields, classify it as harness / spec-load
+  before changing content. The native agent parser ignores golden references, so validate those
+  separately with `check_eval_quality.py` and deterministic golden-workspace replay.
 - A pass with one worker or an enlarged local timeout is not normal execution evidence. Reproduce
   with the repository's normal concurrency and declared suite budget; a failure there is a
   reliability defect.
@@ -186,9 +187,12 @@ python eng/eval-quality/check_eval_quality.py
 ```
 
 Use the production path at normal worker concurrency and with the declared `defaults.timeout`:
-Vally for skill evals, and `skill-validator evaluate` for agent evals. Do not use a serial-only pass
-or a larger ad hoc budget as completion evidence. For broad routing or behavior changes, collect
-separate GPT-family and Claude-family results. Do not pool model families into extra stimulus votes.
+Vally for skill evals, and `skill-validator evaluate` for agent evals. For an agent eval, separately
+run `check_eval_quality.py`, apply each golden patch to its materialized fixture, and run the
+applicable deterministic file, output, and command graders against the golden result. Do not use a
+serial-only pass or a larger ad hoc budget as completion evidence. For broad routing or behavior
+changes, collect separate GPT-family and Claude-family results. Do not pool model families into
+extra stimulus votes.
 
 Then request the official run by submitting a PR review containing `/evaluate` (Files changed →
 Review changes), which binds the run to the reviewed commit. Before declaring a regression on the
@@ -200,7 +204,8 @@ result, confirm the skill payload actually changed — reruns on byte-identical 
 - [ ] For a content fix, a losing trial and the judge's stated reason are quoted in the PR description.
 - [ ] The failure was classified before any content was edited.
 - [ ] `check_eval_quality.py` and `skill-validator check` both pass.
-- [ ] The production skill or agent runner accepts the spec and golden evidence.
+- [ ] The production skill or agent runner accepts the executable spec.
+- [ ] Golden references pass the standalone checker and deterministic replay.
 - [ ] The eval completes under normal concurrency and its declared time budget.
 - [ ] Golden acceptance and mutation rejection have been demonstrated.
 - [ ] Distinct-stimulus count clears the power bar for the target effect and observed tie rate.

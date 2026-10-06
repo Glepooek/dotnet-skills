@@ -7,7 +7,8 @@ Symptom → cause → fix, with the PR where each was diagnosed. Use with
 
 | Symptom | Cause | Fix | Evidence |
 |---------|-------|-----|----------|
-| "Evaluation ran but produced no results", advice says transient infrastructure | The spec uses deprecated `config:` or declares both `config:` and `defaults:`; the gate rejects the alias and Vally rejects both keys | Replace `config:` with one `defaults:` block carrying `timeout` and `runs` | PR #971 |
+| "Evaluation ran but produced no results", advice says transient infrastructure | The spec declares both `config:` and `defaults:`; Vally rejects the mixed settings keys | Merge the settings into one `defaults:` block carrying `timeout` and `runs` | PR #971 |
+| Authoring gate rejects an otherwise loadable spec | The spec uses the deprecated top-level `config:` alias | Rename `config:` to `defaults:` and preserve its settings | `eng/eval-quality/README.md` |
 | Same message, nothing in `plugins/` changed | Genuine LLM-session auth failure | Re-post `/evaluate`; inspect job logs before touching content | PR #932 |
 | Trial errored, avgN unusually low | Judge-side CAPI / `session.idle` timeout, not fixture nondeterminism | Read the trial stderr first; fix the harness, do not pin an SDK | PR #907 |
 | Timeout on an advisory question | `expect_tools: [bash]` forced a restore or build | Drop the tool requirement; the answer was always textual | PR #861 |

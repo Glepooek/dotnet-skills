@@ -16,7 +16,8 @@ Leave an inline comment only for a specific, actionable defect. Check that:
   customer-journey value;
 - prompts are natural developer requests and do not name the skill, reveal the answer, or prescribe
   its workflow;
-- deterministic graders prove the complete required result and preserve every in-scope file;
+- deterministic graders prove the complete required result and, when scope or preservation is part
+  of the request, cover every in-scope file;
 - golden evidence passes the deterministic contract and a realistic broken mutation would fail it;
 - rewrite scenarios include an already-correct no-op case, and routing boundaries include an
   uncued dormancy case that proves recognition, restraint, and redirection;

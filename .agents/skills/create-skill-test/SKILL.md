@@ -37,9 +37,10 @@ and does not overfit to the skill's own wording.
 
 ### Step 1: Prove the eval belongs to the target
 
-Before writing YAML, state the delta that the target should add. A stimulus is necessary only when
-the target should change the answer, action, restraint, or validation result compared with the same
-model without the target.
+Before writing YAML, state what the stimulus proves. A preference stimulus is necessary when the
+target should improve the answer, action, restraint, or validation result compared with the same
+model without the target. A non-voting activation contract or no-op guard is necessary when it
+protects a meaningful invariant, even if correct behavior is baseline-equivalent.
 
 Do not add a stimulus when it measures:
 
@@ -49,9 +50,11 @@ Do not add a stimulus when it measures:
 - a renamed or lightly reworded copy of an existing case; or
 - a `disable-model-invocation: true` reference skill in isolation.
 
-Map each proposed case to one distinct **capability**, **risk**, and **customer journey**. If two
-cases have the same inputs, expected outcome, failure mode, and grader path, keep the stronger one.
-This is the scenario-necessity review; the five-stimulus floor never justifies padding.
+Map each proposed case to **capability**, **risk**, and **customer journey** tags. Preference cases
+must add distinct voting value. Activation contracts and no-op guards may share a capability when
+they protect a separate routing or preservation invariant. If two cases have the same inputs,
+expected outcome, failure mode, and grader path, keep the stronger one. The five-stimulus floor
+never justifies padding.
 
 Then locate the target and test directory:
 
@@ -353,9 +356,12 @@ Validation must cover four layers:
 
 1. **Deterministic structure:** run `check_eval_quality.py` and the relevant checker self-tests when
    the checker changes.
-2. **Production parsing:** run skill evals through the repository's Vally entry point and agent
-   evals through `skill-validator evaluate`, the native SDK lane. A generic YAML parser does not
-   prove that the production runner accepts the schema, references, or ATIF trajectory.
+2. **Production parsing and golden replay:** run skill evals through the repository's Vally entry
+   point. For agent evals, run `skill-validator evaluate` to prove the native SDK lane accepts the
+   executable scenario fields. That parser does not read `golden_trajectory` or `golden_patch`, so
+   validate the references separately: run `check_eval_quality.py`, then materialize the fixture,
+   apply the golden patch, and run every applicable deterministic file and command grader against
+   the golden workspace. Confirm the final golden response passes its output graders.
 3. **Normal execution:** use the normal worker concurrency and the declared `defaults.timeout`.
    Do not certify an eval only with one worker or a larger ad hoc time budget. If normal concurrency
    exposes a race or timeout, classify it as reliability evidence.
@@ -378,7 +384,7 @@ For the official run, submit a PR review containing `/evaluate` so it binds to t
 - [ ] Directory is `tests/<plugin>/<skill-name>/` or `tests/<plugin>/agent.<agent-name>/`
 - [ ] Spec uses `stimuli:` / `graders:` and the current `defaults:` settings block
 - [ ] At least 5 preference-eligible distinct stimuli exist; dormancy contracts do not count toward this floor
-- [ ] Every stimulus is necessary, fits the target, and adds distinct capability/risk/journey value
+- [ ] Every stimulus is necessary and fits the target; each preference case adds distinct voting value
 - [ ] Each capability stimulus has stable `capability`, `risk`, and `journey` tags and a unique name
 - [ ] Prompts never name the skill, the agent, or its vocabulary
 - [ ] Every referenced fixture exists and is tracked by `git ls-files`
@@ -389,7 +395,8 @@ For the official run, submit a PR review containing `/evaluate` so it binds to t
 - [ ] Golden evidence passes deterministic graders, and a realistic mutation fails them
 - [ ] Rubric items are outcome-shaped and never reward using the skill
 - [ ] Rewrite skills have a no-op case; routing boundaries use `expect_activation: false` alone
-- [ ] The production skill or agent runner parses the eval and completes under normal concurrency and time limits
+- [ ] The production runner accepts the executable spec and completes under normal concurrency and time limits
+- [ ] Golden references pass the standalone checker and deterministic replay
 - [ ] Broad routing or behavior changes have separate GPT-family and Claude-family evidence
 - [ ] `skill-validator check` and `check_eval_quality.py` pass
 
