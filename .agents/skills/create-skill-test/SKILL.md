@@ -30,7 +30,7 @@ and does not overfit to the skill's own wording.
 | Skill or agent name | Yes | Must exist under `plugins/<plugin>/skills/` or `plugins/<plugin>/agents/` |
 | Plugin name | Yes | e.g. `dotnet-msbuild` |
 | Skill content | Yes | Read it — you cannot write non-overfitted rubric items without it |
-| Scenario hypothesis | Yes | State why the target should change the outcome for each proposed stimulus |
+| Scenario hypothesis | Yes | State the expected improvement for a preference case, or the invariant protected by a guard |
 | Failure modes to discriminate | Recommended | Each becomes one distinct stimulus |
 
 ## Workflow
