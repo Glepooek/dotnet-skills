@@ -23,8 +23,9 @@ Apply these checks before treating a passing gate as a good eval:
 
 1. **Necessity and fit:** the target should change the outcome. Do not measure generic knowledge,
    path recall, or an unreachable reference skill.
-2. **Distinct value:** each preference-eligible case adds a different capability, risk, or customer
-   journey, recorded in stable `capability`, `risk`, and `journey` tags.
+2. **Tags and distinct value:** every stimulus in a `type: capability` eval has stable `capability`,
+   `risk`, and `journey` tags, including dormancy cases. Each preference-eligible case adds a
+   different capability, risk, or customer journey.
 3. **Natural prompt:** the request does not name the target, quote its vocabulary, disclose the
    solution, or prescribe its workflow.
 4. **Deterministic outcome:** graders prove the required response and workspace state over the

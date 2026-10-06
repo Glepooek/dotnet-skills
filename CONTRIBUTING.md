@@ -314,9 +314,10 @@ apply this order:
 1. **Prove necessity and skill fit.** Add a scenario only when the target skill or agent should
    change the answer or action. Do not eval generic model knowledge, path recall, or a
    `disable-model-invocation: true` reference in isolation.
-2. **Add distinct value.** Each preference-eligible stimulus must cover a different capability,
-   risk, or customer journey. Tag all three with stable lowercase kebab-case values. Renamed or
-   reworded duplicates do not add evidence.
+2. **Tag every capability stimulus; add distinct value to voting cases.** Every stimulus in a
+   `type: capability` eval must have stable lowercase kebab-case `capability`, `risk`, and `journey`
+   tags, including dormancy cases. Each preference-eligible stimulus must cover a different value;
+   renamed or reworded duplicates do not add evidence.
 3. **Use a natural, non-cued request.** Write the prompt as a developer would ask it. Do not name
    the target, quote its vocabulary, reveal the fix, or tell the agent which workflow to follow.
 4. **Make the outcome deterministic.** State what must be true in the response and workspace.
@@ -360,6 +361,10 @@ stimuli:
   - name: "Describe what the agent should do"
     prompt: |
       The prompt sent to the agent.
+    tags:
+      capability: distinct-capability
+      risk: failure-being-prevented
+      journey: customer-task
     graders:
       # Deterministic graders check the produced output/artifacts.
       - type: exit-success

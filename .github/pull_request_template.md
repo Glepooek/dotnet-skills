@@ -28,6 +28,7 @@ For every eval-related change, including a new eval:
 - [ ] Graders cover the full result, accept the golden result, and reject a realistic mutation.
 - [ ] No-op, dormancy, and statistical power are covered where needed.
 - [ ] I ran the applicable production evaluation path and recorded the result above.
-- [ ] I classified failures before edits and checked broad changes across model families.
+- [ ] If this fixes a failed eval, I classified the failure before editing skill content.
+- [ ] If this broadly changes routing or behavior, I checked separate model-family evidence.
 
 </details>
