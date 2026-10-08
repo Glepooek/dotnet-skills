@@ -1,4 +1,4 @@
-"""Run: python -m unittest discover -s tests/dotnet-test/code-testing-agent/graders -p test_check_xunit_tests.py -v
+"""Run: python -m unittest discover -s tests/dotnet-test/code-testing/graders -p test_check_xunit_tests.py -v
 
 Integration cases use the actual .NET 10 SDK and xUnit v3 packages. Every case
 starts from a fresh fixture copy under cwd; all scratch directories are removed.
@@ -19,7 +19,7 @@ import check_xunit_tests as grader
 HERE = Path(__file__).resolve().parent
 FIXTURES = (
     HERE.parent / "fixtures" / "sdk-xunit-orders",
-    HERE.parents[1] / "agent.code-testing-generator" / "fixtures" / "sdk-xunit-orders",
+    HERE.parents[1] / "agent.test-engineer" / "fixtures" / "sdk-xunit-orders",
 )
 
 

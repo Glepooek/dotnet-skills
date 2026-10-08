@@ -1,4 +1,4 @@
-"""Run: python -m unittest discover -s tests/dotnet-test/code-testing-agent/graders -p test_check_cart_tests.py -v
+"""Run: python -m unittest discover -s tests/dotnet-test/code-testing/graders -p test_check_cart_tests.py -v
 
 The integration cases require Node/npm, install the fixture's lockfile into
 isolated directories, and exercise real Vitest (including coverage). All scratch
@@ -20,7 +20,7 @@ import check_cart_tests as grader
 HERE = Path(__file__).resolve().parent
 FIXTURES = (
     HERE.parent / "fixtures" / "typescript-vitest-cart",
-    HERE.parents[1] / "agent.code-testing-generator" / "fixtures" / "typescript-vitest-cart",
+    HERE.parents[1] / "agent.test-engineer" / "fixtures" / "typescript-vitest-cart",
 )
 
 

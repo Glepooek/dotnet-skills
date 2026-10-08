@@ -81,7 +81,7 @@ class PythonBehaviorTests(unittest.TestCase):
     def test_concrete_api_suite_kills_every_mutant_in_both_fixtures(self):
         output = self.run_checker("verify", True)
         self.assertEqual(output.count("Detected "), len(MUTATIONS))
-        agent_fixture = CHECKER.parents[2] / "agent.code-testing-generator" / "fixtures" / "python-multimodule"
+        agent_fixture = CHECKER.parents[2] / "agent.test-engineer" / "fixtures" / "python-multimodule"
         shutil.rmtree(self.project)
         shutil.copytree(agent_fixture, self.project)
         self.test_file.write_text(SUITE.replace("test_statistics", "test_arithmetic"), encoding="utf-8")

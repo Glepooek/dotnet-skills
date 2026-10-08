@@ -1,5 +1,5 @@
-name: agent.code-testing-generator
-description: Evaluates the dotnet-test/code-testing-generator custom-agent pipeline
+name: agent.test-engineer
+description: Evaluates the dotnet-test/test-engineer public orchestrator agent
 type: capability
 tags:
   executionShard: generation
@@ -23,16 +23,16 @@ stimuli:
       risk: missed-boundary-coverage
       journey: generate-multimodule-python-suite
     constraints:
-      reject_agents: [code-testing-generator]
+      reject_agents: [test-engineer]
     environment:
       files:
         - src: ../graders/authenticated_artifacts.py
           dest: .eval/authenticated_artifacts.py
         - src: fixtures/python-multimodule
           dest: fixtures/python-multimodule
-        - src: ../code-testing-agent/graders/check_python_tests.py
+        - src: ../code-testing/graders/check_python_tests.py
           dest: .eval/check_python_tests.py
-        - src: ../code-testing-agent/graders/check_production.py
+        - src: ../code-testing/graders/check_production.py
           dest: .eval/check_production.py
       commands:
         - git init -q
@@ -40,7 +40,7 @@ stimuli:
         - python3 .eval/check_production.py snapshot fixtures/python-multimodule/analytics fixtures/python-multimodule/textkit
         - python3 .eval/check_python_tests.py snapshot fixtures/python-multimodule
       skills:
-        - ../../plugins/dotnet-test/skills/code-testing-agent
+        - ../../plugins/dotnet-test/skills/code-testing
         - ../../plugins/dotnet-test/skills/code-testing-extensions
         - ../../plugins/dotnet-test/skills/test-gap-analysis
         - ../../plugins/dotnet-test/skills/assertion-quality
@@ -84,14 +84,14 @@ stimuli:
       risk: legacy-project-drift
       journey: extend-classic-dotnet-suite
     constraints:
-      reject_agents: [code-testing-generator]
+      reject_agents: [test-engineer]
     environment:
       files:
         - src: ../graders/authenticated_artifacts.py
           dest: .eval/authenticated_artifacts.py
         - src: fixtures/classic-mstest
           dest: fixtures/classic-mstest
-        - src: ../code-testing-agent/graders/check_production.py
+        - src: ../code-testing/graders/check_production.py
           dest: .eval/check_production.py
         - src: graders/check_classic_preservation.py
           dest: .eval/check_classic_preservation.py
@@ -103,7 +103,7 @@ stimuli:
         - python3 .eval/check_production.py snapshot fixtures/classic-mstest/src
         - python3 .eval/check_classic_preservation.py snapshot fixtures/classic-mstest
       skills:
-        - ../../plugins/dotnet-test/skills/code-testing-agent
+        - ../../plugins/dotnet-test/skills/code-testing
         - ../../plugins/dotnet-test/skills/code-testing-extensions
         - ../../plugins/dotnet-test/skills/test-gap-analysis
         - ../../plugins/dotnet-test/skills/assertion-quality
@@ -184,20 +184,20 @@ stimuli:
       risk: collaborator-path-omission
       journey: generate-go-module-suite
     constraints:
-      reject_agents: [code-testing-generator]
+      reject_agents: [test-engineer]
     environment:
       files:
         - src: ../graders/authenticated_artifacts.py
           dest: .eval/authenticated_artifacts.py
         - src: fixtures/go-multipackage
           dest: fixtures/go-multipackage
-        - src: ../code-testing-agent/graders/check_production.py
+        - src: ../code-testing/graders/check_production.py
           dest: .eval/check_production.py
       commands:
         - git init -q
         - python3 .eval/check_production.py snapshot fixtures/go-multipackage/money fixtures/go-multipackage/shipping fixtures/go-multipackage/order
       skills:
-        - ../../plugins/dotnet-test/skills/code-testing-agent
+        - ../../plugins/dotnet-test/skills/code-testing
         - ../../plugins/dotnet-test/skills/code-testing-extensions
         - ../../plugins/dotnet-test/skills/test-gap-analysis
         - ../../plugins/dotnet-test/skills/assertion-quality
@@ -250,23 +250,23 @@ stimuli:
       risk: async-integration-gaps
       journey: generate-typescript-cart-suite
     constraints:
-      reject_agents: [code-testing-generator]
+      reject_agents: [test-engineer]
     environment:
       files:
         - src: ../graders/authenticated_artifacts.py
           dest: .eval/authenticated_artifacts.py
         - src: fixtures/typescript-vitest-cart
           dest: fixtures/typescript-vitest-cart
-        - src: ../code-testing-agent/graders/check_cart_tests.py
+        - src: ../code-testing/graders/check_cart_tests.py
           dest: .eval/check_cart_tests.py
-        - src: ../code-testing-agent/graders/check_production.py
+        - src: ../code-testing/graders/check_production.py
           dest: .eval/check_production.py
       commands:
         - git init -q
         - python3 .eval/check_production.py snapshot fixtures/typescript-vitest-cart/src
         - python3 .eval/check_cart_tests.py snapshot fixtures/typescript-vitest-cart .eval/cart-baseline.json
       skills:
-        - ../../plugins/dotnet-test/skills/code-testing-agent
+        - ../../plugins/dotnet-test/skills/code-testing
         - ../../plugins/dotnet-test/skills/code-testing-extensions
         - ../../plugins/dotnet-test/skills/test-gap-analysis
         - ../../plugins/dotnet-test/skills/assertion-quality
@@ -305,21 +305,21 @@ stimuli:
       risk: time-boundary-gaps
       journey: generate-dotnet-order-suite
     constraints:
-      reject_agents: [code-testing-generator]
+      reject_agents: [test-engineer]
     environment:
       files:
         - src: ../graders/authenticated_artifacts.py
           dest: .eval/authenticated_artifacts.py
         - src: fixtures/sdk-xunit-orders
           dest: fixtures/sdk-xunit-orders
-        - src: ../code-testing-agent/graders/check_xunit_tests.py
+        - src: ../code-testing/graders/check_xunit_tests.py
           dest: .eval/check_xunit_tests.py
       commands:
         - find fixtures/sdk-xunit-orders/tests -type f -name '*.cs' -delete
         - git init -q
         - python3 .eval/check_xunit_tests.py snapshot fixtures/sdk-xunit-orders .eval/xunit-baseline.json
       skills:
-        - ../../plugins/dotnet-test/skills/code-testing-agent
+        - ../../plugins/dotnet-test/skills/code-testing
         - ../../plugins/dotnet-test/skills/code-testing-extensions
         - ../../plugins/dotnet-test/skills/test-gap-analysis
         - ../../plugins/dotnet-test/skills/assertion-quality
@@ -350,7 +350,7 @@ stimuli:
       for each requested behavior.
     deny_shell: true
     constraints:
-      reject_agents: [code-testing-generator]
+      reject_agents: [test-engineer]
       reject_shell_retries: true
     tags:
       capability: test-generation-with-unrun-validation
@@ -362,9 +362,9 @@ stimuli:
           dest: .eval/authenticated_artifacts.py
         - src: fixtures/python-multimodule
           dest: fixtures/python-multimodule
-        - src: ../code-testing-agent/graders/check_python_tests.py
+        - src: ../code-testing/graders/check_python_tests.py
           dest: .eval/check_python_tests.py
-        - src: ../code-testing-agent/graders/check_production.py
+        - src: ../code-testing/graders/check_production.py
           dest: .eval/check_production.py
       commands:
         - git init -q
@@ -372,7 +372,7 @@ stimuli:
         - python .eval/check_production.py snapshot fixtures/python-multimodule/analytics fixtures/python-multimodule/textkit
         - python .eval/check_python_tests.py snapshot fixtures/python-multimodule
       skills:
-        - ../../plugins/dotnet-test/skills/code-testing-agent
+        - ../../plugins/dotnet-test/skills/code-testing
         - ../../plugins/dotnet-test/skills/code-testing-extensions
         - ../../plugins/dotnet-test/skills/test-gap-analysis
         - ../../plugins/dotnet-test/skills/assertion-quality
@@ -476,3 +476,145 @@ stimuli:
       - Identified test execution as unavailable because shell permission was denied, rather than reporting a failing test suite
       - Reported a partial result that distinguishes written tests from unrun validation and unmeasured coverage
       - Mapped requested behaviors to named test artifacts without claiming successful test execution or measured coverage
+
+  - name: Generate focused tests directly
+    prompt: |
+      Add focused pytest coverage for slugify. Cover separator collapsing,
+      trimming, max-length truncation at a word boundary, truncation without a
+      boundary, and invalid non-positive max_length values. Run the tests.
+    tags:
+      capability: focused-pytest-generation
+      risk: unnecessary-pipeline-fanout
+      journey: extend-one-python-function
+    constraints:
+      reject_agents: [test-engineer]
+    environment:
+      files:
+        - src: ../graders/authenticated_artifacts.py
+          dest: .eval/authenticated_artifacts.py
+        - src: ../code-testing/fixtures/python-single-function
+          dest: slug-project
+      commands:
+        - python3 -m pip install --quiet pytest==8.3.5
+      skills:
+        - ../../plugins/dotnet-test/skills/code-testing
+        - ../../plugins/dotnet-test/skills/code-testing-extensions
+        - ../../plugins/dotnet-test/skills/test-gap-analysis
+        - ../../plugins/dotnet-test/skills/assertion-quality
+    graders:
+      - type: run-command
+        config:
+          command: sh -c "cd slug-project && python3 -m pytest -q"
+          expected_exit_code: 0
+          timeout: 5m
+      - type: run-command
+        config:
+          command: sh -c "grep -Rqi 'max_length' slug-project/tests && grep -Rqi 'separator\\|collapse' slug-project/tests"
+          expected_exit_code: 0
+          timeout: 1m
+      - type: output-matches
+        config:
+          pattern: (Requirement coverage|\|\s*Requirement\s*\|\s*Evidence\s*\|)
+      - type: prompt
+    rubric:
+      - Added passing tests for every requested slug behavior
+      - Used concrete expected slug values and exception assertions
+      - Kept the work focused on slugify and its tests
+      - Reported exact test evidence and the successful validation command
+
+  - name: Repair weak tests and close named gaps
+    prompt: |
+      Improve ShoppingCartTests so the suite no longer gives false confidence.
+      Replace the assertion-free, tautological, catch-and-swallow, and
+      Thread.Sleep patterns with meaningful tests. Add coverage for RemoveItem,
+      duplicate product quantities, and the 0% and 100% discount boundaries.
+      Run the test project after the changes.
+    tags:
+      capability: test-repair
+      risk: weakened-assertions
+      journey: repair-mstest-suite
+    constraints:
+      reject_agents: [test-engineer]
+    environment:
+      files:
+        - src: ../graders/authenticated_artifacts.py
+          dest: .eval/authenticated_artifacts.py
+        - src: ../agent.test-quality-auditor/fixtures/weak-tests
+          dest: WeakTests
+      skills:
+        - ../../plugins/dotnet-test/skills/code-testing
+        - ../../plugins/dotnet-test/skills/test-anti-patterns
+        - ../../plugins/dotnet-test/skills/assertion-quality
+        - ../../plugins/dotnet-test/skills/test-gap-analysis
+        - ../../plugins/dotnet-test/skills/writing-mstest-tests
+    graders:
+      - type: run-command
+        config:
+          command: dotnet test WeakTests/WeakTests.csproj
+          expected_exit_code: 0
+          stdout_matches: '(?i)(Passed!|Passed:\s*[1-9]|Test Run Successful)'
+          timeout: 10m
+      - type: file-not-contains
+        config:
+          path: WeakTests/ShoppingCartTests.cs
+          value: Assert.AreEqual(total, total)
+      - type: file-not-contains
+        config:
+          path: WeakTests/ShoppingCartTests.cs
+          value: Thread.Sleep
+      - type: run-command
+        config:
+          command: sh -c "grep -qi 'RemoveItem' WeakTests/ShoppingCartTests.cs && grep -qi 'duplicate\\|merge' WeakTests/ShoppingCartTests.cs && grep -q '100' WeakTests/ShoppingCartTests.cs"
+          expected_exit_code: 0
+          timeout: 1m
+      - type: prompt
+    rubric:
+      - Replaced each named weak pattern with behavior-pinning assertions
+      - Added direct tests for removal, duplicate quantities, and both discount boundaries
+      - Preserved the production implementation and existing MSTest project
+      - Ran the test project successfully
+
+  - name: Audit a suite without editing it
+    prompt: |
+      Audit the WeakTests project for the most important test-quality problems.
+      Prioritize false-confidence risks and coverage gaps, but do not change any
+      files.
+    tags:
+      capability: read-only-test-audit
+      risk: unintended-test-edits
+      journey: audit-weak-mstest-suite
+    constraints:
+      reject_agents: [test-engineer]
+    environment:
+      files:
+        - src: ../graders/authenticated_artifacts.py
+          dest: .eval/authenticated_artifacts.py
+        - src: ../agent.test-quality-auditor/fixtures/weak-tests
+          dest: WeakTests
+      commands:
+        - mkdir -p .eval-baseline && cp -R WeakTests .eval-baseline/WeakTests
+      skills:
+        - ../../plugins/dotnet-test/skills/test-anti-patterns
+        - ../../plugins/dotnet-test/skills/assertion-quality
+        - ../../plugins/dotnet-test/skills/test-gap-analysis
+    graders:
+      - type: output-matches
+        config:
+          pattern: (assertion.free|no.*assert|missing.*assert)
+      - type: output-matches
+        config:
+          pattern: (tautolog|self.compar|same.*value)
+      - type: output-matches
+        config:
+          pattern: (RemoveItem|GetTotalWithDiscount|coverage gap|untested)
+      - type: run-command
+        config:
+          command: diff -ru .eval-baseline/WeakTests WeakTests
+          expected_exit_code: 0
+          timeout: 1m
+      - type: prompt
+    rubric:
+      - Identified the most severe false-confidence patterns
+      - Identified meaningful untested ShoppingCart behavior
+      - Prioritized findings and suggested concrete corrections
+      - Respected the analysis-only request and left the supplied test file unchanged

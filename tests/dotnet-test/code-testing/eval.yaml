@@ -1,5 +1,5 @@
-name: code-testing-agent
-description: Evaluates the dotnet-test/code-testing-agent skill
+name: code-testing
+description: Evaluates the dotnet-test/code-testing skill
 type: capability
 tags:
   executionShard: generation
@@ -159,9 +159,9 @@ stimuli:
           dest: fixtures/classic-mstest
         - src: graders/check_production.py
           dest: .eval/check_production.py
-        - src: ../agent.code-testing-generator/graders/check_classic_preservation.py
+        - src: ../agent.test-engineer/graders/check_classic_preservation.py
           dest: .eval/check_classic_preservation.py
-        - src: ../agent.code-testing-generator/graders/check_classic_behavior.py
+        - src: ../agent.test-engineer/graders/check_classic_behavior.py
           dest: .eval/check_classic_behavior.py
       commands:
         - rm -f fixtures/classic-mstest/tests/DiscountServiceBoundaryTests.cs fixtures/classic-mstest/tests/TieredDiscountPolicyTests.cs && cp fixtures/classic-mstest/tests/Discounts.Tests.csproj.pristine fixtures/classic-mstest/tests/Discounts.Tests.csproj && rm fixtures/classic-mstest/tests/Discounts.Tests.csproj.pristine && mkdir -p .eval-baseline && cp fixtures/classic-mstest/tests/DiscountServiceTests.cs .eval-baseline/DiscountServiceTests.cs && cp fixtures/classic-mstest/tests/packages.config .eval-baseline/packages.config

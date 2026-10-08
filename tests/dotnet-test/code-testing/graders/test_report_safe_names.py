@@ -7,12 +7,12 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[4]
 PLUGIN = ROOT / "plugins" / "dotnet-test"
-PROMPT = PLUGIN / "skills" / "code-testing-agent" / "unit-test-generation.prompt.md"
+PROMPT = PLUGIN / "skills" / "code-testing" / "unit-test-generation.prompt.md"
 HEADING = "Report-safe test names and result validation"
 ANCHOR = "report-safe-test-names-and-result-validation"
 CONSUMERS = (
-    "skills/code-testing-agent/SKILL.md",
-    "agents/code-testing-generator.agent.md",
+    "skills/code-testing/SKILL.md",
+    "agents/test-engineer.agent.md",
     "agents/code-testing-implementer.agent.md",
     "agents/code-testing-tester.agent.md",
     "skills/code-testing-extensions/extensions/typescript.md",
