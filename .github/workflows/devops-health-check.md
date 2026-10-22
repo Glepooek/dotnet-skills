@@ -1188,11 +1188,24 @@ findings. Retain the validated previous issue body in memory for Step 2.
 
 ### 1.1 Pipeline Health (P1–P6)
 
+**Deterministic Actions pagination contract:** For every P1-P6, U1, or U2
+workflow-run inventory, call `actions_list` with the narrowest supported
+filters, `per_page: 100`, and explicit `page` values starting at `1`. Process
+each page immediately, deduplicate runs by run ID, and continue until the page
+is empty, has fewer than 100 entries, or its oldest `created_at` reaches the
+check's cutoff. Stop after 50 pages. If page 50 is full and still newer than
+the cutoff, mark only that observation scope unavailable. A full first page is
+not evidence that pagination is unavailable. Do not rely on implicit MCP
+pagination.
+
 **P1 — Failed workflow runs on `main` in last 24h:**
 ```
-GET /repos/{owner}/{repo}/actions/runs?branch=main&status=failure&per_page=30
+GET /repos/{owner}/{repo}/actions/runs?branch=main&status=failure&per_page=100&page={page}
 ```
 Filter to runs created within the last 24 hours. For each failed run:
+- Use paginated Actions job data for that run and inspect only failed job logs
+  when needed to identify the failed step. P1 is complete only when both the
+  run inventory and each included run's failed job/step identity are complete.
 - Extract `workflow_name`, `conclusion`, `job_name`, `failed_step`
 - Fingerprint: `pipeline:{workflow_name}:{job_name}:{failed_step}:{conclusion}`
 - Severity: 🔴 Critical if `evaluation` workflow fails; 🟡 Warning for others
@@ -1202,14 +1215,14 @@ Filter to runs created within the last 24 hours. For each failed run:
 
 **P2 — Cancelled/timed-out runs in last 24h:**
 ```
-GET /repos/{owner}/{repo}/actions/runs?branch=main&status=cancelled&per_page=10
+GET /repos/{owner}/{repo}/actions/runs?branch=main&status=cancelled&per_page=100&page={page}
 ```
 - Fingerprint: `pipeline:{workflow_name}:{job_name}:timeout`
 - Severity: 🟡 Warning
 
 **P3 — Evaluation duration trend:**
 ```
-GET /repos/{owner}/{repo}/actions/workflows/evaluation.yml/runs?branch=main&per_page=30
+GET /repos/{owner}/{repo}/actions/workflows/evaluation.yml/runs?branch=main&per_page=100&page={page}
 ```
 Compute average run duration over the last 14 days.
 - 🟡 Warning if avg > 50 min (83% of 60-min timeout)
@@ -1218,16 +1231,18 @@ Compute average run duration over the last 14 days.
 
 **P4 — Workflow failure rate (7-day rolling):**
 ```
-GET /repos/{owner}/{repo}/actions/runs?branch=main&per_page=100
+GET /repos/{owner}/{repo}/actions/runs?branch=main&per_page=100&page={page}
 ```
 Group by workflow name, compute success/failure ratio over the last 7 days.
 - 🔵 Info (metric only — reported in trends table, not fingerprinted)
 
 **P5 — Evaluation failure rate across all branches (last 24h):**
 ```
-GET /repos/{owner}/{repo}/actions/workflows/evaluation.yml/runs?per_page=100
+GET /repos/{owner}/{repo}/actions/workflows/evaluation.yml/runs?per_page=100&page={page}
 ```
-Filter to runs created within the last 24 hours across all branches and event types (schedule, pull_request, workflow_dispatch). Paginate if the first page does not cover the full 24h window. Compute:
+Filter to runs created within the last 24 hours across all branches and event
+types (schedule, pull_request, workflow_dispatch). Apply the deterministic
+pagination contract even when page 1 is full. Compute:
 - Total runs, failures (conclusion=failure), cancellations (conclusion=cancelled), successes
 - **Overall failure rate** = failures / (failures + successes) — exclude cancelled runs from denominator
 - **Overall non-success rate** = (failures + cancellations) / total
@@ -1245,7 +1260,7 @@ Also include in the finding details:
 
 **P6 — Evaluation scheduled run cancellation rate (last 24h):**
 ```
-GET /repos/{owner}/{repo}/actions/workflows/evaluation.yml/runs?branch=main&event=schedule&per_page=100
+GET /repos/{owner}/{repo}/actions/workflows/evaluation.yml/runs?branch=main&event=schedule&per_page=100&page={page}
 ```
 Filter to scheduled runs on `main` created within the last 24 hours. Compute:
 - Total scheduled runs, cancelled count, completed count
@@ -1396,6 +1411,12 @@ After collecting all findings, perform the diff:
    through normal classification. Derive the owning scope from the complete
    fingerprint-to-scope table in the imported knowledge; do not infer it only
    from the broad `pipeline`, `infra`, or `resource` category.
+
+   When a scope is successfully observed, do not carry forward findings that
+   are absent from its complete current inventory. Apply the normal fingerprint
+   diff: a retired evaluation lane or old severity bucket becomes RESOLVED, and
+   a current lane or bucket with a different fingerprint becomes NEW. Never
+   rewrite an old fingerprint into a new one or transfer its investigation row.
 
    **State overflow guard:** If more than 100 active findings are collected,
    call `noop` with the measured count and stop. Do not update the dashboard,

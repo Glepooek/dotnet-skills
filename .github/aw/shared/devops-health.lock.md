@@ -360,7 +360,14 @@ Do not create per-finding islands or HTML-comment row markers.
 
 ### 7.1 API Rate Limits
 - Use targeted, date-filtered queries to minimize API calls
-- The `github` MCP toolset handles pagination automatically
+- Paginate every high-volume Actions list explicitly with `actions_list`,
+  `per_page: 100`, and page numbers starting at `1`
+- Continue until a page is empty, contains fewer than 100 entries, or its
+  oldest `created_at` value reaches the requested cutoff
+- Process pages incrementally and deduplicate workflow runs by run ID
+- Stop after 50 pages. If page 50 is full and its oldest entry is still newer
+  than the cutoff, mark only that observation scope unavailable
+- Never mark a scope unavailable only because page 1 contains 100 entries
 - Include at most two dispatch inputs in the single publication request
 
 ### 7.2 Issue Body Size

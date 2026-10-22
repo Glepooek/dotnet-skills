@@ -1210,6 +1210,28 @@ class TokenFailoverTests(unittest.TestCase):
         self.assertIn("carry_forward_unchanged", shared_health)
         self.assertIn("do not increment their occurrences", shared_health)
         self.assertIn(
+            "Never mark a scope unavailable only because page 1 contains 100 entries",
+            " ".join(shared_health.split()),
+        )
+        self.assertIn(
+            "Deterministic Actions pagination contract",
+            health_check,
+        )
+        self.assertIn("explicit `page` values starting at `1`", health_check)
+        self.assertIn("Stop after 50 pages", health_check)
+        self.assertIn(
+            "A full first page is not evidence that pagination is unavailable",
+            " ".join(health_check.split()),
+        )
+        self.assertIn(
+            "a retired evaluation lane or old severity bucket becomes RESOLVED",
+            " ".join(health_check.split()),
+        )
+        self.assertIn(
+            "Never rewrite an old fingerprint into a new one",
+            " ".join(health_check.split()),
+        )
+        self.assertIn(
             "`state_json` field of the single\n`publish-health-report` request",
             shared_health,
         )
