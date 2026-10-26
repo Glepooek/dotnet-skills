@@ -2022,8 +2022,14 @@ public class LocalSessionFsHandlerTests
     {
         var root = Path.Combine(Path.GetTempPath(), $"offline-fs-{Guid.NewGuid():N}");
         var stateRoot = Path.Combine(root, "state");
+        var clientStateRoot = Path.Combine(root, "client-state");
         var workDir = Path.Combine(root, "work");
-        var handler = new LocalSessionFsHandler(stateRoot, workDir, [workDir], offlineWorkflow: true);
+        var handler = new LocalSessionFsHandler(
+            stateRoot,
+            workDir,
+            [workDir, clientStateRoot],
+            offlineWorkflow: true,
+            writableAbsoluteRoots: [clientStateRoot]);
         var token = TestContext.CancellationToken;
         var write = ProviderCallback<Func<string, string, int?, CancellationToken, Task>>(handler, "WriteFileAsync");
         var append = ProviderCallback<Func<string, string, int?, CancellationToken, Task>>(handler, "AppendFileAsync");
@@ -2057,6 +2063,11 @@ public class LocalSessionFsHandlerTests
             Assert.AreEqual("{}\n", await read("result.json", token));
             await write("session-state/events.jsonl", "state", null, token);
             Assert.AreEqual("state", await read("session-state/events.jsonl", token));
+            var clientTempDir = Path.Combine(clientStateRoot, "temp");
+            var clientTempFile = Path.Combine(clientTempDir, "events.jsonl");
+            await mkdir(clientTempDir, true, null, token);
+            await write(clientTempFile, "client-state", null, token);
+            Assert.AreEqual("client-state", await read(clientTempFile, token));
         }
         finally
         {

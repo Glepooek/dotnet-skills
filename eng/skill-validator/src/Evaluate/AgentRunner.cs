@@ -856,7 +856,8 @@ public static class AgentRunner
                 configDir,
                 workDir,
                 new[] { workDir, GetClientSessionStateRoot() }.Concat(additionalAllowedDirs),
-                offlineWorkflow),
+                offlineWorkflow,
+                writableAbsoluteRoots: [GetClientSessionStateRoot()]),
             OnPermissionRequest = (request, invocation) =>
             {
                 if (denyShell && request is PermissionRequestShell)

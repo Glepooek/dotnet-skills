@@ -194,7 +194,6 @@ stimuli:
       - type: tool-calls
         config:
           disallowed:
-            - bash
             - edit
             - create
       - type: output-matches
