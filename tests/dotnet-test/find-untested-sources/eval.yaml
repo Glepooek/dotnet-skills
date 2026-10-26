@@ -12,7 +12,7 @@ type: capability
 # These tasks are expensive and cover distinct source-discovery cases. Add a new
 # discriminating stimulus, not more runs, to improve statistical power.
 defaults:
-  timeout: 5m
+  timeout: 10m
   runs: 3
 
 stimuli:

@@ -2069,17 +2069,21 @@ public class LocalSessionFsHandlerTests
     {
         var root = Path.Combine(Path.GetTempPath(), $"session-fs-{Guid.NewGuid():N}");
         var stateRoot = Path.Combine(root, "config");
+        var clientStateRoot = Path.Combine(root, "client-state");
         var workDir = Path.Combine(root, "work");
         var stagedDir = Path.Combine(root, "staged");
         Directory.CreateDirectory(stagedDir);
 
         try
         {
-            var handler = new LocalSessionFsHandler(stateRoot, workDir, [workDir, stagedDir]);
+            var handler = new LocalSessionFsHandler(stateRoot, workDir, [workDir, clientStateRoot, stagedDir]);
 
             Assert.AreEqual(
                 Path.Combine(stateRoot, "session-state", "events.jsonl"),
                 handler.ResolvePath(Path.Combine("session-state", "events.jsonl")));
+            Assert.AreEqual(
+                Path.Combine(clientStateRoot, "temp"),
+                handler.ResolvePath(Path.Combine(clientStateRoot, "temp")));
             Assert.AreEqual(
                 Path.Combine(workDir, "src", "Program.cs"),
                 handler.ResolvePath(Path.Combine("src", "Program.cs")));
