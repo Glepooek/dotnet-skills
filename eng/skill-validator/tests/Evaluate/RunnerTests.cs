@@ -2024,6 +2024,7 @@ public class LocalSessionFsHandlerTests
         var stateRoot = Path.Combine(root, "state");
         var clientStateRoot = Path.Combine(root, "client-state");
         var workDir = Path.Combine(root, "work");
+        Directory.CreateDirectory(clientStateRoot);
         var handler = new LocalSessionFsHandler(
             stateRoot,
             workDir,
