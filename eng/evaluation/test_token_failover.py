@@ -539,6 +539,62 @@ class TokenFailoverTests(unittest.TestCase):
         )
         self.assertEqual(persisted["calls"], [])
 
+        workflow_evidence_state = (
+            "<!-- devops-health-state:v1\n"
+            + json.dumps(
+                {
+                    "active_findings": [
+                        {
+                            "category": "infra",
+                            "fingerprint": "infra:relaxed-skill-validation",
+                            "first_seen": "2026-10-15",
+                            "occurrences": 1,
+                            "severity": "warning",
+                            "title": "Relaxed skill validation",
+                            "url": (
+                                "https://github.com/dotnet/skills/actions/"
+                                "workflows/validate-skills.yml"
+                            ),
+                        }
+                    ],
+                    "history": [],
+                },
+                separators=(",", ":"),
+            )
+            + "\n-->"
+        )
+        workflow_evidence = run_health_publisher(
+            self,
+            workflow_evidence_state,
+        )
+        self.assertEqual(workflow_evidence["errors"], [])
+
+        invalid_pipeline_url_state = (
+            "<!-- devops-health-state:v1\n"
+            + json.dumps(
+                {
+                    "active_findings": [
+                        {
+                            "category": "pipeline",
+                            "fingerprint": (
+                                "pipeline:evaluation:failure-rate:critical"
+                            ),
+                            "first_seen": "2026-10-15",
+                            "occurrences": 1,
+                            "severity": "critical",
+                            "title": "Evaluation failure rate is critical",
+                            "url": (
+                                "https://github.com/dotnet/skills/actions/"
+                                "workflows/evaluation.yml"
+                            ),
+                        }
+                    ],
+                    "history": [],
+                },
+                separators=(",", ":"),
+            )
+            + "\n-->"
+        )
         invalid_markers = {
             "duplicated": (
                 f"{valid_state}\n{valid_state}",
@@ -551,6 +607,10 @@ class TokenFailoverTests(unittest.TestCase):
             "schema-invalid": (
                 "<!-- devops-health-state:v1\n{}\n-->",
                 "Existing dashboard state has an invalid top-level schema",
+            ),
+            "category-url-invalid": (
+                invalid_pipeline_url_state,
+                "Existing dashboard state contains an invalid active finding",
             ),
         }
         for name, (body, expected_error) in invalid_markers.items():
@@ -1221,8 +1281,36 @@ class TokenFailoverTests(unittest.TestCase):
             "Deterministic Actions pagination contract",
             health_check,
         )
-        self.assertIn("explicit `page` values starting at `1`", health_check)
-        self.assertIn("Stop after 50 pages", health_check)
+        self.assertIn("`page` values\nstarting at `1`", health_check)
+        self.assertIn(
+            "`method: list_workflow_runs`, `perPage: 100`",
+            " ".join(health_check.split()),
+        )
+        self.assertIn(
+            "Do not send `workflow_runs_filter`",
+            " ".join(health_check.split()),
+        )
+        self.assertIn(
+            "Filter locally to `branch=main`, `conclusion=failure`",
+            " ".join(health_check.split()),
+        )
+        self.assertIn(
+            "`conclusion` in `cancelled` or `timed_out`",
+            " ".join(health_check.split()),
+        )
+        self.assertIn(
+            "use the literal `workflow` as `job_name`",
+            " ".join(health_check.split()),
+        )
+        self.assertIn(
+            "every matched run's job inventory are complete",
+            " ".join(health_check.split()),
+        )
+        self.assertIn(
+            "does not expose the REST `created` filter",
+            " ".join(health_check.split()),
+        )
+        self.assertIn("Stop after 100 total pages", health_check)
         self.assertIn(
             "A full first page is not evidence that pagination is unavailable",
             " ".join(health_check.split()),
@@ -1233,6 +1321,47 @@ class TokenFailoverTests(unittest.TestCase):
         )
         self.assertIn(
             "Never rewrite an old fingerprint into a new one",
+            " ".join(health_check.split()),
+        )
+        self.assertIn(
+            "The configured GitHub MCP toolset does not expose the Pages builds API",
+            " ".join(health_check.split()),
+        )
+        self.assertIn(
+            "Mark I5 as unavailable and exclude it from state resolution",
+            " ".join(health_check.split()),
+        )
+        self.assertIn(
+            "Carry any existing I5 finding forward unchanged",
+            " ".join(health_check.split()),
+        )
+        self.assertIn(
+            "newest failed run in the observation window",
+            " ".join(health_check.split()),
+        )
+        self.assertIn(
+            "newest cancelled scheduled run in the observation window",
+            " ".join(health_check.split()),
+        )
+        self.assertNotIn("resource_id=pages-build-deployment", health_check)
+        self.assertIn(
+            "Use `get_file_contents` to list `.github/workflows`",
+            health_check,
+        )
+        self.assertIn(
+            "list the immediate component directories under `plugins/`",
+            " ".join(health_check.split()),
+        )
+        self.assertIn(
+            "Do not omit a component because its manifest is absent",
+            " ".join(health_check.split()),
+        )
+        self.assertIn(
+            "filename:SKILL.md path:plugins/{component}",
+            health_check,
+        )
+        self.assertIn(
+            "repository-wide 100-result code-search cap",
             " ".join(health_check.split()),
         )
         self.assertIn(
@@ -1265,7 +1394,10 @@ class TokenFailoverTests(unittest.TestCase):
         self.assertIn("complete fingerprint-to-scope table", normalized_health)
         self.assertIn("smallest affected observation scope", normalized_health)
         self.assertIn("exclude them from RESOLVED", health_check)
-        self.assertIn("pages-build-deployment", health_check)
+        self.assertIn(
+            "`pages-build-deployment` is not a valid workflow resource",
+            health_check,
+        )
         self.assertNotIn("GET /repos/{owner}/{repo}/pages", health_check)
         self.assertIn("Pending — dispatch budget reached", health_check)
         self.assertIn("Dispatch retry", health_check)
