@@ -303,7 +303,7 @@ stimuli:
       console reports an unsupported edit while the tests no longer update. Can
       hot reload apply this change, and what should I do next? Preserve that
       targeted loop after recovery and include a watch-managed fallback for
-      future unsupported edits.
+      future unsupported edits. Do not run commands or modify the project.
     environment:
       files:
         - src: ./fixtures/enable-hot-reload-when-package-already-installed/TestProject.csproj
