@@ -183,7 +183,8 @@ stimuli:
       capability: reject-vstest-hot-reload-setup
       risk: unsupported-platform-mutation
       journey: assess-hot-reload-eligibility
-    prompt: I have some failing tests and want to use hot reload to iterate faster. Can you set it up for me?
+    prompt: I have some failing tests and want to use hot reload to iterate faster. Check whether this project supports
+      MTP hot reload and tell me how to proceed, but do not run or modify anything.
     environment:
       files:
         - src: ./fixtures/negative-vstest-project-cannot-use-mtp-hot-reload/TestProject.csproj
