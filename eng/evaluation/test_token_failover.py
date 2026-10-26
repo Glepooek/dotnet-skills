@@ -959,6 +959,10 @@ class TokenFailoverTests(unittest.TestCase):
         )
         self.assertIn("validResourceUrlForType", health_lock_text)
         self.assertIn(
+            "actions/workflows/[A-Za-z0-9._-]+\\\\.ya?ml",
+            health_lock_text,
+        )
+        self.assertIn(
             'url.pathname === `/${owner}/${repo}/issues/695`',
             health_lock_text,
         )

@@ -391,7 +391,7 @@ safe-outputs:
                 return (
                   url.pathname === root ||
                   new RegExp(
-                    `^${root}/(actions/runs/\\d+|commit/[0-9a-fA-F]+|pull/\\d+|issues/\\d+|blob/.+|tree/.+)$`
+                    `^${root}/(actions/runs/\\d+|actions/workflows/[A-Za-z0-9._-]+\\.ya?ml|commit/[0-9a-fA-F]+|pull/\\d+|issues/\\d+|blob/.+|tree/.+)$`
                   ).test(url.pathname)
                 );
               };
