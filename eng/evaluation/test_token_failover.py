@@ -1353,7 +1353,17 @@ class TokenFailoverTests(unittest.TestCase):
             " ".join(health_check.split()),
         )
         self.assertIn(
-            "Do not omit a component because its manifest is absent",
+            "Do not omit a component because its manifest is confirmed absent",
+            " ".join(health_check.split()),
+        )
+        self.assertIn(
+            "If a component's `plugin.json` cannot be read for any other reason, "
+            "mark I7 unavailable",
+            " ".join(health_check.split()),
+        )
+        self.assertIn(
+            "Carry existing I7 findings forward unchanged through "
+            "`unavailable_scopes`",
             " ".join(health_check.split()),
         )
         self.assertIn(

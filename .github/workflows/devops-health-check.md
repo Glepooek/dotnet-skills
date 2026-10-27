@@ -1359,9 +1359,12 @@ get_file_contents: plugins/{component}/plugin.json
 get_file_contents: plugins/{component}/{configured_skills_path}
 ```
 Specifically:
-- Treat any discovered `SKILL.md` under a component with no readable
-  `plugin.json` as orphaned. Do not omit a component because its manifest is
-  absent.
+- Treat any discovered `SKILL.md` under a component whose `plugin.json` lookup
+  explicitly returns 404/not found as orphaned. Do not omit a component because
+  its manifest is confirmed absent.
+- If a component's `plugin.json` cannot be read for any other reason, mark I7
+  unavailable. Carry existing I7 findings forward unchanged through
+  `unavailable_scopes`; do not create or resolve I7 findings from that run.
 - Parse `plugins/{component}/plugin.json` and resolve the `skills` field (e.g., `"./skills/"`) relative to the plugin directory.
 - List that directory with `get_file_contents` and confirm each child skill
   directory contains `SKILL.md`.
