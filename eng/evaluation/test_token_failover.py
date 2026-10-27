@@ -170,6 +170,8 @@ const github = {{
 def run_health_publisher(
     test_case: unittest.TestCase,
     current_body: str,
+    *,
+    replacement_state: dict[str, object] | None = None,
 ) -> dict[str, object]:
     node = shutil.which("node")
     if not node:
@@ -204,8 +206,16 @@ def run_health_publisher(
                             "comment_body": "## 📋 Health Check — 2026-10-15",
                             "state_json": (
                                 "```json\n"
-                                '{"active_findings":[],"history":[]}'
-                                "\n```"
+                                + json.dumps(
+                                    replacement_state
+                                    if replacement_state is not None
+                                    else {
+                                        "active_findings": [],
+                                        "history": [],
+                                    },
+                                    separators=(",", ":"),
+                                )
+                                + "\n```"
                             ),
                             "investigation_rows_json": "```json\n[]\n```",
                             "dispatches_json": "```json\n[]\n```",
@@ -569,23 +579,61 @@ class TokenFailoverTests(unittest.TestCase):
         )
         self.assertEqual(workflow_evidence["errors"], [])
 
+        legacy_pipeline_finding = {
+            "category": "pipeline",
+            "fingerprint": "pipeline:evaluation:failure-rate:critical",
+            "first_seen": "2026-10-15",
+            "occurrences": 1,
+            "severity": "critical",
+            "title": "Evaluation failure rate is critical",
+            "url": (
+                "https://github.com/dotnet/skills/actions/"
+                "workflows/evaluation.yml"
+            ),
+        }
+        legacy_pipeline_state = (
+            "<!-- devops-health-state:v1\n"
+            + json.dumps(
+                {
+                    "active_findings": [legacy_pipeline_finding],
+                    "history": [],
+                },
+                separators=(",", ":"),
+            )
+            + "\n-->"
+        )
+        migrated_pipeline_finding = {
+            **legacy_pipeline_finding,
+            "url": "https://github.com/dotnet/skills/actions/runs/123",
+        }
+        migrated = run_health_publisher(
+            self,
+            legacy_pipeline_state,
+            replacement_state={
+                "active_findings": [migrated_pipeline_finding],
+                "history": [],
+            },
+        )
+        self.assertEqual(migrated["errors"], [])
+        self.assertIn(
+            "https://github.com/dotnet/skills/actions/runs/123",
+            migrated["dashboardBody"],
+        )
+        self.assertNotIn(
+            "https://github.com/dotnet/skills/actions/workflows/evaluation.yml",
+            migrated["dashboardBody"],
+        )
+
         invalid_pipeline_url_state = (
             "<!-- devops-health-state:v1\n"
             + json.dumps(
                 {
                     "active_findings": [
                         {
-                            "category": "pipeline",
-                            "fingerprint": (
-                                "pipeline:evaluation:failure-rate:critical"
-                            ),
-                            "first_seen": "2026-10-15",
-                            "occurrences": 1,
-                            "severity": "critical",
-                            "title": "Evaluation failure rate is critical",
+                            **legacy_pipeline_finding,
                             "url": (
-                                "https://github.com/dotnet/skills/actions/"
-                                "workflows/evaluation.yml"
+                                "https://github.com/other/repository/actions/"
+                                "runs/123"
                             ),
                         }
                     ],

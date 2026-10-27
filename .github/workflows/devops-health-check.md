@@ -485,7 +485,11 @@ safe-outputs:
                 return JSON.parse(match[1]);
               };
 
-              const validateState = (candidate, source) => {
+              const validateState = (
+                candidate,
+                source,
+                resourceUrlValidator = validResourceUrlForType
+              ) => {
                 if (
                   !exactKeys(candidate, ["active_findings", "history"]) ||
                   !Array.isArray(candidate.active_findings) ||
@@ -516,7 +520,7 @@ safe-outputs:
                     typeof finding.title !== "string" ||
                     finding.title.length === 0 ||
                     finding.title.length > 200 ||
-                    !validResourceUrlForType(
+                    !resourceUrlValidator(
                       finding.url,
                       finding.category
                     ) ||
@@ -572,7 +576,8 @@ safe-outputs:
                 try {
                   validateState(
                     JSON.parse(currentStateMatches[0][1]),
-                    "Existing dashboard state"
+                    "Existing dashboard state",
+                    validRepositoryUrl
                   );
                 } catch (error) {
                   core.setFailed(error.message);
