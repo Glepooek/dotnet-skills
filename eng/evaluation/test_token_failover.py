@@ -549,24 +549,23 @@ class TokenFailoverTests(unittest.TestCase):
         )
         self.assertEqual(persisted["calls"], [])
 
+        workflow_evidence_finding = {
+            "category": "infra",
+            "fingerprint": "infra:relaxed-skill-validation",
+            "first_seen": "2026-10-15",
+            "occurrences": 1,
+            "severity": "warning",
+            "title": "Relaxed skill validation",
+            "url": (
+                "https://github.com/dotnet/skills/actions/"
+                "workflows/validate-skills.yml"
+            ),
+        }
         workflow_evidence_state = (
             "<!-- devops-health-state:v1\n"
             + json.dumps(
                 {
-                    "active_findings": [
-                        {
-                            "category": "infra",
-                            "fingerprint": "infra:relaxed-skill-validation",
-                            "first_seen": "2026-10-15",
-                            "occurrences": 1,
-                            "severity": "warning",
-                            "title": "Relaxed skill validation",
-                            "url": (
-                                "https://github.com/dotnet/skills/actions/"
-                                "workflows/validate-skills.yml"
-                            ),
-                        }
-                    ],
+                    "active_findings": [workflow_evidence_finding],
                     "history": [],
                 },
                 separators=(",", ":"),
@@ -576,6 +575,10 @@ class TokenFailoverTests(unittest.TestCase):
         workflow_evidence = run_health_publisher(
             self,
             workflow_evidence_state,
+            replacement_state={
+                "active_findings": [workflow_evidence_finding],
+                "history": [],
+            },
         )
         self.assertEqual(workflow_evidence["errors"], [])
 
