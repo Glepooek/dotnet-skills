@@ -694,6 +694,40 @@ class TokenFailoverTests(unittest.TestCase):
             marker_free_carry_forward["dashboardBody"],
         )
 
+        marker_free_occurrence_mutation = run_health_publisher(
+            self,
+            marker_free_legacy_report.replace(
+                "**Occurrences:** 1",
+                "**Occurrences:** 10",
+            ),
+            replacement_state={
+                "active_findings": [legacy_pipeline_finding],
+                "history": [],
+            },
+        )
+        self.assertEqual(
+            marker_free_occurrence_mutation["errors"],
+            ["Dashboard state contains an invalid active finding"],
+        )
+        self.assertEqual(marker_free_occurrence_mutation["calls"], [])
+
+        marker_free_title_mutation = run_health_publisher(
+            self,
+            marker_free_legacy_report.replace(
+                "Evaluation failure rate is critical</summary>",
+                "Evaluation failure rate is critical today</summary>",
+            ),
+            replacement_state={
+                "active_findings": [legacy_pipeline_finding],
+                "history": [],
+            },
+        )
+        self.assertEqual(
+            marker_free_title_mutation["errors"],
+            ["Dashboard state contains an invalid active finding"],
+        )
+        self.assertEqual(marker_free_title_mutation["calls"], [])
+
         changed_legacy_pipeline = run_health_publisher(
             self,
             legacy_pipeline_state,

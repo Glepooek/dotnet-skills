@@ -647,35 +647,42 @@ safe-outputs:
                   return false;
                 }
                 const block = matchingBlocks[0];
-                const normalizedBlock = block.toLowerCase();
-                const severityIcon = {
+                const titleMatch =
+                  /<summary>(🔴|🟡|🔵) ([^\r\n<]+)<\/summary>/.exec(block) ||
+                  /(?:^|\n)### (🔴|🟡|🔵) ([^\r\n]+)(?:\r?\n|$)/.exec(block);
+                const categoryMatch =
+                  /\*\*Category:\*\*\s*([A-Za-z]+)/i.exec(block);
+                const firstSeenMatch =
+                  /\*\*First seen:\*\*\s*(\d{4}-\d{2}-\d{2})(?=\s|$)/i.exec(
+                    block
+                  );
+                const occurrencesMatch =
+                  /\*\*Occurrences:\*\*\s*(\d+)(?=\s|$)/i.exec(block);
+                const linkedUrls = [
+                  ...block.matchAll(/\]\((https:[^)\r\n]+)\)/g),
+                ].map(match => match[1]);
+                const expectedSeverityIcon = {
                   critical: "🔴",
                   warning: "🟡",
                   info: "🔵",
                 }[finding.severity];
                 const hasFirstSeen =
-                  normalizedBlock.includes(
-                    `**first seen:** ${finding.first_seen}`.toLowerCase()
-                  ) ||
+                  firstSeenMatch?.[1] === finding.first_seen ||
                   (
                     finding.first_seen === legacyReportDate &&
-                    !normalizedBlock.includes("**first seen:**")
+                    !firstSeenMatch
                   );
                 const hasOccurrences =
-                  normalizedBlock.includes(
-                    `**occurrences:** ${finding.occurrences}`.toLowerCase()
-                  ) ||
+                  Number(occurrencesMatch?.[1]) === finding.occurrences ||
                   (
                     finding.occurrences === 1 &&
-                    !normalizedBlock.includes("**occurrences:**")
+                    !occurrencesMatch
                   );
                 return (
-                  block.includes(finding.title) &&
-                  block.includes(severityIcon) &&
-                  normalizedBlock.includes(
-                    `**category:** ${finding.category}`.toLowerCase()
-                  ) &&
-                  block.includes(`](${finding.url})`) &&
+                  titleMatch?.[1] === expectedSeverityIcon &&
+                  titleMatch?.[2] === finding.title &&
+                  categoryMatch?.[1].toLowerCase() === finding.category &&
+                  linkedUrls.includes(finding.url) &&
                   hasFirstSeen &&
                   hasOccurrences
                 );
