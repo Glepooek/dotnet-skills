@@ -576,7 +576,12 @@ class TokenFailoverTests(unittest.TestCase):
             self,
             workflow_evidence_state,
             replacement_state={
-                "active_findings": [workflow_evidence_finding],
+                "active_findings": [
+                    {
+                        **workflow_evidence_finding,
+                        "occurrences": 2,
+                    }
+                ],
                 "history": [],
             },
         )
