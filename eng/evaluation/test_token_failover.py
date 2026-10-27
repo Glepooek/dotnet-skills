@@ -627,6 +627,20 @@ class TokenFailoverTests(unittest.TestCase):
             migrated["dashboardBody"],
         )
 
+        unchanged_carry_forward = run_health_publisher(
+            self,
+            legacy_pipeline_state,
+            replacement_state={
+                "active_findings": [legacy_pipeline_finding],
+                "history": [],
+            },
+        )
+        self.assertEqual(unchanged_carry_forward["errors"], [])
+        self.assertIn(
+            "https://github.com/dotnet/skills/actions/workflows/evaluation.yml",
+            unchanged_carry_forward["dashboardBody"],
+        )
+
         invalid_pipeline_url_state = (
             "<!-- devops-health-state:v1\n"
             + json.dumps(

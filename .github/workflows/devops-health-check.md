@@ -522,7 +522,8 @@ safe-outputs:
                     finding.title.length > 200 ||
                     !resourceUrlValidator(
                       finding.url,
-                      finding.category
+                      finding.category,
+                      finding
                     ) ||
                     !validDate(finding.first_seen) ||
                     !validCount(finding.occurrences) ||
@@ -554,6 +555,15 @@ safe-outputs:
                 }
                 return findings;
               };
+              const sameFinding = (left, right) =>
+                left !== undefined &&
+                left.category === right.category &&
+                left.fingerprint === right.fingerprint &&
+                left.first_seen === right.first_seen &&
+                left.occurrences === right.occurrences &&
+                left.severity === right.severity &&
+                left.title === right.title &&
+                left.url === right.url;
 
               const currentBody = dashboard.data.body || "";
               const currentStateMatches = [
@@ -564,6 +574,7 @@ safe-outputs:
               const currentStateTokenCount =
                 currentBody.split("<!-- devops-health-state:v1").length - 1;
               const hasPersistedState = currentStateMatches.length === 1;
+              let previousStateFindings = new Map();
               if (currentStateTokenCount > 1) {
                 core.setFailed("Existing dashboard state marker is duplicated");
                 return;
@@ -574,7 +585,7 @@ safe-outputs:
               }
               if (currentStateMatches.length === 1) {
                 try {
-                  validateState(
+                  previousStateFindings = validateState(
                     JSON.parse(currentStateMatches[0][1]),
                     "Existing dashboard state",
                     validRepositoryUrl
@@ -652,7 +663,16 @@ safe-outputs:
               let stateFindings;
               try {
                 state = parseFencedJson(item.state_json, "state_json", 100000);
-                stateFindings = validateState(state, "Dashboard state");
+                stateFindings = validateState(
+                  state,
+                  "Dashboard state",
+                  (url, category, finding) =>
+                    validResourceUrlForType(url, category) ||
+                    sameFinding(
+                      previousStateFindings.get(finding.fingerprint),
+                      finding
+                    )
+                );
               } catch (error) {
                 core.setFailed(error.message);
                 return;
