@@ -646,6 +646,73 @@ class TokenFailoverTests(unittest.TestCase):
             unchanged_carry_forward["dashboardBody"],
         )
 
+        marker_free_legacy_report = "\n".join(
+            [
+                "# 🏥 Daily Health Check — 2026-10-15",
+                "## 🆕 New Findings (0)",
+                "None.",
+                "## 🔍 Investigation Results",
+                "None.",
+                "## 📌 Existing Findings (1)",
+                "<details>",
+                (
+                    "<summary>🔴 Evaluation failure rate is critical"
+                    "</summary>"
+                ),
+                "",
+                (
+                    "- **Fingerprint:** "
+                    "`pipeline:evaluation:failure-rate:critical`"
+                ),
+                (
+                    "- **Category:** Pipeline · **First seen:** 2026-10-15 "
+                    "· **Occurrences:** 1"
+                ),
+                (
+                    "- **Evidence:** "
+                    "[Evaluation workflow]"
+                    "(https://github.com/dotnet/skills/actions/"
+                    "workflows/evaluation.yml)"
+                ),
+                "",
+                "</details>",
+                "## 📊 Trends (7-day)",
+                "None.",
+            ]
+        )
+        marker_free_carry_forward = run_health_publisher(
+            self,
+            marker_free_legacy_report,
+            replacement_state={
+                "active_findings": [legacy_pipeline_finding],
+                "history": [],
+            },
+        )
+        self.assertEqual(marker_free_carry_forward["errors"], [])
+        self.assertIn(
+            "https://github.com/dotnet/skills/actions/workflows/evaluation.yml",
+            marker_free_carry_forward["dashboardBody"],
+        )
+
+        changed_legacy_pipeline = run_health_publisher(
+            self,
+            legacy_pipeline_state,
+            replacement_state={
+                "active_findings": [
+                    {
+                        **legacy_pipeline_finding,
+                        "occurrences": 2,
+                    }
+                ],
+                "history": [],
+            },
+        )
+        self.assertEqual(
+            changed_legacy_pipeline["errors"],
+            ["Dashboard state contains an invalid active finding"],
+        )
+        self.assertEqual(changed_legacy_pipeline["calls"], [])
+
         invalid_pipeline_url_state = (
             "<!-- devops-health-state:v1\n"
             + json.dumps(

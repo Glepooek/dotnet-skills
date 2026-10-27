@@ -595,6 +595,91 @@ safe-outputs:
                   return;
                 }
               }
+              const legacyReportHeader = "# 🏥 Daily Health Check — ";
+              const legacyReportStart = currentBody.lastIndexOf(legacyReportHeader);
+              const legacyReport =
+                legacyReportStart >= 0
+                  ? currentBody.slice(legacyReportStart)
+                  : "";
+              const legacyReportDate = new RegExp(
+                `^${legacyReportHeader}(\\d{4}-\\d{2}-\\d{2})$`,
+                "m"
+              ).exec(legacyReport)?.[1];
+              const legacySection = (heading, nextHeading) => {
+                const start = legacyReport.indexOf(heading);
+                if (start < 0) {
+                  return "";
+                }
+                const end = legacyReport.indexOf(nextHeading, start + heading.length);
+                return legacyReport.slice(start, end < 0 ? undefined : end);
+              };
+              const legacyActiveReport =
+                legacySection(
+                  "## 🆕 New Findings",
+                  "## 🔍 Investigation Results"
+                ) +
+                legacySection(
+                  "## 📌 Existing Findings",
+                  "## 📊 Trends"
+                );
+              const legacyFindingBlocks = [
+                ...legacyActiveReport.matchAll(
+                  /<details>[\s\S]*?<\/details>/g
+                ),
+                ...legacyActiveReport.matchAll(
+                  /(?:^|\n)### [\s\S]*?(?=\n### |\n---|$)/g
+                ),
+              ].map(match => match[0]);
+              const legacyFindingInReport = finding => {
+                if (
+                  hasPersistedState ||
+                  !validRepositoryUrl(finding.url) ||
+                  !legacyReportDate
+                ) {
+                  return false;
+                }
+                const fingerprintToken =
+                  `**Fingerprint:** \`${finding.fingerprint}\``;
+                const matchingBlocks = legacyFindingBlocks.filter(block =>
+                  block.includes(fingerprintToken)
+                );
+                if (matchingBlocks.length !== 1) {
+                  return false;
+                }
+                const block = matchingBlocks[0];
+                const normalizedBlock = block.toLowerCase();
+                const severityIcon = {
+                  critical: "🔴",
+                  warning: "🟡",
+                  info: "🔵",
+                }[finding.severity];
+                const hasFirstSeen =
+                  normalizedBlock.includes(
+                    `**first seen:** ${finding.first_seen}`.toLowerCase()
+                  ) ||
+                  (
+                    finding.first_seen === legacyReportDate &&
+                    !normalizedBlock.includes("**first seen:**")
+                  );
+                const hasOccurrences =
+                  normalizedBlock.includes(
+                    `**occurrences:** ${finding.occurrences}`.toLowerCase()
+                  ) ||
+                  (
+                    finding.occurrences === 1 &&
+                    !normalizedBlock.includes("**occurrences:**")
+                  );
+                return (
+                  block.includes(finding.title) &&
+                  block.includes(severityIcon) &&
+                  normalizedBlock.includes(
+                    `**category:** ${finding.category}`.toLowerCase()
+                  ) &&
+                  block.includes(`](${finding.url})`) &&
+                  hasFirstSeen &&
+                  hasOccurrences
+                );
+              };
 
               const priorOutbox = new Map();
               for (const line of currentBody.split(/\r?\n/)) {
@@ -671,7 +756,8 @@ safe-outputs:
                     sameFinding(
                       previousStateFindings.get(finding.fingerprint),
                       finding
-                    )
+                    ) ||
+                    legacyFindingInReport(finding)
                 );
               } catch (error) {
                 core.setFailed(error.message);
